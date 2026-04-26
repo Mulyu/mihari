@@ -6,162 +6,97 @@
 
 ```
 runbooks/
-├── aurora-pgsql-tmp.yaml
-├── ecs-task-failure.yaml
-└── examples/
-    └── ...
+├── disk-full.yaml
+└── oom.yaml
 ```
 
-`runbooks/` 配下の `*.yaml` を起動時に全部ロードする。`examples/` は明示的にコピーするまで使われない（推奨慣習）。
+`runbooks/` 配下の `*.yaml` を起動時に全部ロードする。
 
 ## 全体構造
 
 ```yaml
-id: aurora-pgsql-tmp-investigate     # ユニークID（必須、kebab-case推奨）
-description: ...                      # 人間向け説明
-version: 1                            # スキーマバージョン
+id: disk-full-cleanup                 # ユニークID（必須、kebab-case推奨）
+description: ディスクフル時のtmpクリーンアップ
 
-trigger:                              # 必須（runで使うときも形式上書く）
-  source: datadog                     # datadog | slack
-  match:
-    monitor_tags: ["service:aurora"]
-    title_pattern: "pgsql_tmp|disk"
-
-permissions: read-only                # read-only | write
-require_approval: false               # write のとき true 推奨
-
-inputs:                               # トリガーから抽出する変数（任意）
-  alert_id: "{{ event.id }}"
-  title: "{{ event.title }}"
+trigger:                              # 必須
+  source: file                        # MVPでは file のみ
+  path: /var/log/myapp.log            # 監視対象ファイル
+  pattern: "ERROR.*disk full"         # 正規表現。マッチした行で発火
 
 steps:                                # 必須
-  - id: step1
-    bash: ...
-  - id: step2
-    claude:
-      prompt: ...
+  - id: cleanup
+    bash: /usr/local/bin/cleanup-tmp.sh
 ```
 
 ## トリガー
 
 ```yaml
 trigger:
-  source: datadog
-  match:
-    monitor_tags: ["service:aurora", "env:prod"]    # 全部含むときマッチ
-    title_pattern: "pgsql_tmp|disk full"            # 正規表現
-    alert_type: ["error", "warning"]                # 任意
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR.*disk full"
 ```
 
-```yaml
-trigger:
-  source: slack
-  match:
-    channel: "C01234567"                            # チャンネルID
-    user_pattern: "^U.*BOT.*$"                      # bot投稿のみ等
-    text_pattern: "P1 alert"
-```
+| フィールド | 内容 |
+|----------|------|
+| `source` | `file` のみ（MVP） |
+| `path` | 監視するログファイルの絶対パス |
+| `pattern` | 行に対する正規表現。マッチで発火 |
 
-複数ランブックが同一イベントにマッチしたら **全て並列実行**。衝突回避はランブック側の責務。
+複数ランブックが同一行にマッチしたら **全て順次実行**（並列ではない、シンプルさ優先）。
 
 ## ステップ
 
 ### `bash` ステップ
 
 ```yaml
-- id: collect_clusters
+- id: cleanup
   bash: |
-    aws rds describe-db-clusters \
-      --query 'DBClusters[?starts_with(DBClusterIdentifier, `prod-`)]' \
-      --output json
-  capture: clusters_json              # stdout を変数に格納
-  timeout_sec: 30                     # デフォ60秒
+    df -h /var
+    /usr/local/bin/cleanup-tmp.sh
+  timeout_sec: 60                     # デフォ 60
   on_error: stop                      # stop | continue（デフォ stop）
   env:
-    AWS_REGION: ap-northeast-1
+    APP_ENV: prod
 ```
 
 | フィールド | 内容 |
 |----------|------|
 | `bash` | シェルスクリプト本文（複数行可） |
-| `capture` | stdout を格納する変数名 |
 | `timeout_sec` | タイムアウト秒数 |
 | `on_error` | 失敗時の挙動（`stop` でランブック停止、`continue` で次へ） |
 | `env` | 環境変数追加 |
 
-### `claude` ステップ
+stdoutとstderrはmihariのログに記録される。
 
-```yaml
-- id: investigate
-  claude:
-    prompt: |
-      Datadogアラート: {{ inputs.title }}
-      対象: {{ steps.collect_clusters.output }}
-      pg_stat_activity を確認し、長時間 temp_files を生成しているクエリを特定してください。
-    allowed_tools: ["Bash", "Read", "mcp__slack__*"]
-    max_turns: 20
-    timeout_sec: 600
-    system_prompt: ...                # 任意。デフォはClaude Code相当
-    mcp_servers: ["slack", "github"]  # 任意。設定済みMCPから有効化
-  capture: investigation_summary       # 最終アシスタント応答を格納
-  on_error: stop
-```
+## 変数
 
-| フィールド | 内容 |
-|----------|------|
-| `prompt` | プロンプト本文。テンプレ展開可 |
-| `allowed_tools` | 許可ツール（[permissions.md](./permissions.md) 参照） |
-| `max_turns` | 最大ターン数（デフォ 20） |
-| `timeout_sec` | タイムアウト秒数（デフォ 600） |
-| `system_prompt` | システムプロンプト上書き |
-| `mcp_servers` | 有効化するMCPサーバ名 |
-| `capture` | 最終応答テキストを格納する変数名 |
-
-`@anthropic-ai/claude-agent-sdk` を呼び出す。デフォルトは新規セッション。
-
-### `approval` ステップ
-
-```yaml
-- id: confirm_restart
-  approval:
-    channel: "#ops-approvals"
-    message: |
-      ECSタスクを再起動します。承認してください。
-      対象: {{ steps.identify.output }}
-    timeout_sec: 1800                 # 30分
-    require_reactions: ["white_check_mark"]
-    require_count: 1
-  on_error: stop
-```
-
-Slackに承認カードを投稿し、指定リアクションが付くまでポーリング。詳細は [approval.md](./approval.md)。
-
-## 変数システム
-
-テンプレ構文は `{{ ... }}`。展開タイミングはステップ実行直前。
+トリガーでマッチした行から変数を渡せる：
 
 | 変数 | 内容 |
 |------|------|
-| `{{ inputs.<key> }}` | トリガーから抽出した `inputs:` 定義の値 |
-| `{{ event.<field> }}` | Pollerが返したイベントの生フィールド |
-| `{{ steps.<id>.output }}` | 指定ステップの `capture` 結果 |
+| `{{ event.line }}` | マッチした行の全文 |
+| `{{ event.path }}` | ログファイルのパス |
+| `{{ event.timestamp }}` | mihariが行を読んだ時刻（ISO8601） |
 | `{{ env.<NAME> }}` | 環境変数 |
 
-`bash` の `capture` は stdout、`claude` の `capture` は最終アシスタント応答。これが「bashとclaudeを混ぜる接着剤」。
-
-## 権限とデフォルトツール
+例：
 
 ```yaml
-permissions: read-only       # 自動実行
-permissions: write           # 承認必須
+trigger:
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR.*disk full"
+steps:
+  - id: log_event
+    bash: |
+      echo "matched: {{ event.line }}" >> /var/log/mihari-actions.log
 ```
-
-詳細は [permissions.md](./permissions.md)。
 
 ## バリデーション
 
 ```bash
-runbook validate runbooks/aurora-pgsql-tmp.yaml
+mihari validate runbooks/disk-full.yaml
 ```
 
 CIで全ランブックを検証することを推奨。
@@ -169,48 +104,21 @@ CIで全ランブックを検証することを推奨。
 ## 完全なサンプル
 
 ```yaml
-id: aurora-pgsql-tmp-investigate
-description: Aurora pgsql_tmp ディスク逼迫の調査
-version: 1
+id: disk-full-cleanup
+description: ディスクフル時のtmpクリーンアップ
 
 trigger:
-  source: datadog
-  match:
-    monitor_tags: ["service:aurora"]
-    title_pattern: "pgsql_tmp|disk"
-
-permissions: read-only
-require_approval: false
-
-inputs:
-  alert_id: "{{ event.id }}"
-  monitor_id: "{{ event.monitor_id }}"
-  title: "{{ event.title }}"
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR.*disk full"
 
 steps:
-  - id: collect_clusters
-    bash: |
-      aws rds describe-db-clusters \
-        --query 'DBClusters[?starts_with(DBClusterIdentifier, `prod-`)]' \
-        --output json
-    capture: clusters_json
-    timeout_sec: 30
+  - id: snapshot_disk
+    bash: df -h > /tmp/mihari-disk-$(date +%s).txt
+    timeout_sec: 10
 
-  - id: investigate
-    claude:
-      prompt: |
-        Datadogアラート: {{ inputs.title }}
-        対象クラスタ:
-        ```json
-        {{ steps.collect_clusters.output }}
-        ```
-
-        以下を実行してください:
-        1. 各クラスタに psql で接続し pg_stat_activity を確認
-        2. 長時間 temp_files を生成しているクエリを特定
-        3. 結果を3行サマリで #alerts-aurora にSlack投稿（slack MCPツール使用）
-      allowed_tools: ["Bash", "Read", "mcp__slack__*"]
-      max_turns: 20
-      timeout_sec: 600
-    capture: investigation_summary
+  - id: cleanup
+    bash: /usr/local/bin/cleanup-tmp.sh
+    timeout_sec: 120
+    on_error: stop
 ```

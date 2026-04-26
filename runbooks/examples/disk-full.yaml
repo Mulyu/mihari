@@ -1,0 +1,22 @@
+id: disk-full-cleanup
+description: ディスクフル時のtmpクリーンアップサンプル
+
+trigger:
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR.*disk full"
+
+steps:
+  - id: snapshot_disk
+    bash: |
+      echo "matched: {{ event.line }}"
+      df -h
+    timeout_sec: 10
+    on_error: continue
+
+  - id: cleanup
+    bash: |
+      # サンプル。実運用では `/usr/local/bin/cleanup-tmp.sh` などを呼ぶ。
+      find /tmp -type f -mtime +1 -name '*.tmp' -print
+    timeout_sec: 60
+    on_error: stop

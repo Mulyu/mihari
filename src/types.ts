@@ -25,6 +25,7 @@ export interface BashStep {
   timeout_sec: number;
   on_error: "stop" | "continue";
   env: Record<string, string>;
+  capture: boolean;
 }
 
 // 識別共用体。トリガー種別ごとに利用可能なフィールドを型で表現する。
@@ -61,6 +62,9 @@ export interface StepResult {
   duration_ms: number;
   timed_out: boolean;
   error: string | null;
+  // capture: true のステップで、テンプレ展開で使われる正規化済み stdout（trailing newline 除去）。
+  // それ以外のステップでは null。
+  captured: string | null;
 }
 
 export interface RunResult {

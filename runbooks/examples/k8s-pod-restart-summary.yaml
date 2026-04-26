@@ -1,0 +1,37 @@
+id: k8s-pod-restart-summary
+description: 1時間ごとに Pod restart 数を集計し、増えていたらサマリを出力（capture を使った例）
+
+trigger:
+  source: cron
+  schedule: "0 * * * *"
+
+steps:
+  - id: list_restarts
+    bash: |
+      kubectl get pods -A \
+        -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\t"}{.status.containerStatuses[*].restartCount}{"\n"}{end}' \
+        | awk '$2 > 0'
+    timeout_sec: 30
+    capture: true
+
+  - id: count_lines
+    bash: |
+      lines="{{ steps.list_restarts.output }}"
+      if [ -z "$lines" ]; then
+        echo "0"
+      else
+        echo "$lines" | wc -l
+      fi
+    timeout_sec: 5
+    capture: true
+
+  - id: report
+    bash: |
+      n="{{ steps.count_lines.output }}"
+      if [ "$n" -eq 0 ]; then
+        echo "no restarts in the last hour"
+        exit 0
+      fi
+      printf 'pods with restarts (n=%s):\n%s\n' "$n" "{{ steps.list_restarts.output }}"
+    timeout_sec: 5
+    on_error: continue

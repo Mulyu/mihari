@@ -26,6 +26,7 @@ async function runRunbook(
   const run_id = `run_${randomUUID().slice(0, 8)}`;
   const started_at = new Date().toISOString();
   const results: StepResult[] = [];
+  const capturedSteps: Record<string, string> = {};
 
   log.info(
     { run_id, runbook_id: runbook.id, trigger_type: event.type },
@@ -34,8 +35,9 @@ async function runRunbook(
 
   let allOk = true;
   for (const step of runbook.steps) {
-    const r = await runBashStep(step, { event });
+    const r = await runBashStep(step, { event, capturedSteps });
     results.push(r);
+    if (r.captured !== null) capturedSteps[step.id] = r.captured;
     if (!r.ok) {
       allOk = false;
       log.warn(

@@ -43,6 +43,26 @@ describe("loadRunbookFile", () => {
     expect(rb.steps[0]?.bash).toBe("echo hi");
     expect(rb.steps[0]?.timeout_sec).toBe(60);
     expect(rb.steps[0]?.on_error).toBe("stop");
+    expect(rb.steps[0]?.capture).toBe(false);
+  });
+
+  it("accepts capture: true and surfaces it on the step", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(
+      f,
+      VALID_YAML.replace("    bash: echo hi", "    bash: echo hi\n    capture: true"),
+    );
+    const rb = loadRunbookFile(f);
+    expect(rb.steps[0]?.capture).toBe(true);
+  });
+
+  it("rejects non-boolean capture", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(
+      f,
+      VALID_YAML.replace("    bash: echo hi", "    bash: echo hi\n    capture: \"yes\""),
+    );
+    expect(() => loadRunbookFile(f)).toThrow(/capture must be a boolean/);
   });
 
   it("rejects non-kebab id", () => {

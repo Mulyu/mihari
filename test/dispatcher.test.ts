@@ -9,7 +9,7 @@ function fileRb(id: string, path: string, pattern: RegExp): Runbook {
   return {
     id,
     trigger: { source: "file", path, pattern },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {} }],
+    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
     sourcePath: `/tmp/${id}.yaml`,
   };
 }
@@ -18,7 +18,7 @@ function cronRb(id: string, schedule: string): Runbook {
   return {
     id,
     trigger: { source: "cron", schedule },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {} }],
+    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
     sourcePath: `/tmp/${id}.yaml`,
   };
 }

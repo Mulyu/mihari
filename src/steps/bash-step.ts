@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import pino from "pino";
-import type { BashStep, LogLine, StepResult } from "../types.js";
+import { logger } from "../core/logger.js";
+import type { BashStep, StepResult, TriggerEvent } from "../types.js";
 
-const log = pino({ name: "mihari.step.bash" });
+const log = logger("step.bash");
 
 export interface BashStepContext {
-  event: LogLine | null;
+  event: TriggerEvent;
 }
 
 const TEMPLATE_RE = /\{\{\s*(event\.line|event\.path|event\.timestamp|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
@@ -13,12 +13,12 @@ const TEMPLATE_RE = /\{\{\s*(event\.line|event\.path|event\.timestamp|env\.[A-Za
 export function substituteTemplate(bash: string): string {
   // {{ event.line }} などはシェル展開時に環境変数経由で読む。
   // 値そのものを文字列置換すると、ログ行に `;rm -rf` 等が混ざったとき注入になる。
-  return bash.replace(TEMPLATE_RE, (_, key: string) => {
+  return bash.replace(TEMPLATE_RE, (raw, key: string) => {
     if (key === "event.line") return '"$MIHARI_EVENT_LINE"';
     if (key === "event.path") return '"$MIHARI_EVENT_PATH"';
     if (key === "event.timestamp") return '"$MIHARI_EVENT_TIMESTAMP"';
     if (key.startsWith("env.")) return `"$${key.slice(4)}"`;
-    return _;
+    return raw;
   });
 }
 
@@ -28,11 +28,10 @@ export function buildEnv(
   ctx: BashStepContext,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, ...step.env };
-  if (ctx.event) {
-    env["MIHARI_EVENT_LINE"] = ctx.event.content;
-    env["MIHARI_EVENT_PATH"] = ctx.event.path;
-    env["MIHARI_EVENT_TIMESTAMP"] = ctx.event.timestamp;
-  }
+  // file 以外のトリガーでは line / path に意味が無いので空文字を入れる。
+  env["MIHARI_EVENT_LINE"] = ctx.event.type === "file" ? ctx.event.content : "";
+  env["MIHARI_EVENT_PATH"] = ctx.event.type === "file" ? ctx.event.path : "";
+  env["MIHARI_EVENT_TIMESTAMP"] = ctx.event.timestamp;
   return env;
 }
 
@@ -95,7 +94,7 @@ export async function runBashStep(step: BashStep, ctx: BashStepContext): Promise
         stderr,
         duration_ms: Date.now() - start,
         timed_out: timedOut,
-        ...(timedOut ? { error: `timeout after ${step.timeout_sec}s` } : {}),
+        error: timedOut ? `timeout after ${step.timeout_sec}s` : null,
       });
     });
   });

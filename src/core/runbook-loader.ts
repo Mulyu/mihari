@@ -104,24 +104,33 @@ function validateSteps(raw: unknown, file: string): BashStep[] {
   if (!Array.isArray(raw) || raw.length === 0)
     throw new RunbookValidationError(file, "steps must be a non-empty array");
   const seen = new Set<string>();
-  return raw.map((step, i) => {
-    const path = `steps[${i}]`;
-    if (!isObject(step)) throw new RunbookValidationError(file, `${path} must be a mapping`);
-    const id = mustString(step, "id", file, `${path}.id`);
-    if (seen.has(id)) throw new RunbookValidationError(file, `duplicate step id: ${id}`);
-    seen.add(id);
-    if (!("bash" in step))
-      throw new RunbookValidationError(file, `${path} must have a bash field (only bash steps are supported in MVP)`);
-    const bash = mustString(step, "bash", file, `${path}.bash`);
-    const timeout_sec = optionalNumber(step, "timeout_sec", file, `${path}.timeout_sec`) ?? 60;
-    if (timeout_sec <= 0)
-      throw new RunbookValidationError(file, `${path}.timeout_sec must be > 0`);
-    const onErrorRaw = optionalString(step, "on_error", file, `${path}.on_error`) ?? "stop";
-    if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
-      throw new RunbookValidationError(file, `${path}.on_error must be "stop" or "continue"`);
-    const env = validateEnv(step["env"], file, `${path}.env`);
-    return { id, bash, timeout_sec, on_error: onErrorRaw, env };
-  });
+  const steps: BashStep[] = [];
+  for (const [i, raw_] of raw.entries()) {
+    const step = validateBashStep(raw_, file, `steps[${i}]`);
+    if (seen.has(step.id))
+      throw new RunbookValidationError(file, `duplicate step id: ${step.id}`);
+    seen.add(step.id);
+    steps.push(step);
+  }
+  return steps;
+}
+
+function validateBashStep(raw: unknown, file: string, ctx: string): BashStep {
+  if (!isObject(raw)) throw new RunbookValidationError(file, `${ctx} must be a mapping`);
+  const id = mustString(raw, "id", file, `${ctx}.id`);
+  if (!("bash" in raw))
+    throw new RunbookValidationError(
+      file,
+      `${ctx} must have a bash field (only bash steps are supported in MVP)`,
+    );
+  const bash = mustString(raw, "bash", file, `${ctx}.bash`);
+  const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
+  if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
+  const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
+  if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
+    throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
+  const env = validateEnv(raw["env"], file, `${ctx}.env`);
+  return { id, bash, timeout_sec, on_error: onErrorRaw, env };
 }
 
 function validateEnv(raw: unknown, file: string, ctx: string): Record<string, string> {

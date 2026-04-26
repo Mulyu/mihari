@@ -27,15 +27,15 @@ export interface BashStep {
   env: Record<string, string>;
 }
 
-export interface LogLine {
-  path: string;
-  content: string;
-  timestamp: string;
-}
+// 識別共用体。トリガー種別ごとに利用可能なフィールドを型で表現する。
+export type TriggerEvent =
+  | { type: "file"; path: string; content: string; timestamp: string }
+  | { type: "cron"; timestamp: string }
+  | { type: "manual"; timestamp: string };
 
 export interface Match {
   runbook: Runbook;
-  line: LogLine;
+  event: TriggerEvent;
 }
 
 export interface PollerState {
@@ -60,7 +60,7 @@ export interface StepResult {
   stderr: string;
   duration_ms: number;
   timed_out: boolean;
-  error?: string;
+  error: string | null;
 }
 
 export interface RunResult {
@@ -70,5 +70,5 @@ export interface RunResult {
   finished_at: string;
   ok: boolean;
   steps: StepResult[];
-  trigger_line: string | null;
+  trigger_event: TriggerEvent;
 }

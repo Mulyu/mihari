@@ -1,0 +1,178 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
+import YAML from "yaml";
+import type { Runbook, BashStep } from "../types.js";
+
+export class RunbookValidationError extends Error {
+  constructor(public readonly file: string, message: string) {
+    super(`${file}: ${message}`);
+    this.name = "RunbookValidationError";
+  }
+}
+
+export function loadRunbooks(dir: string): Runbook[] {
+  const files = listYamlFiles(dir);
+  const runbooks = files.map((f) => parseRunbookFile(f));
+  assertUniqueIds(runbooks);
+  return runbooks;
+}
+
+export function loadRunbookFile(path: string): Runbook {
+  return parseRunbookFile(resolve(path));
+}
+
+function listYamlFiles(dir: string): string[] {
+  const out: string[] = [];
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) continue;
+    if (!/\.ya?ml$/.test(entry.name)) continue;
+    out.push(full);
+  }
+  return out.sort();
+}
+
+function parseRunbookFile(file: string): Runbook {
+  const text = readFileSync(file, "utf8");
+  let raw: unknown;
+  try {
+    raw = YAML.parse(text);
+  } catch (e) {
+    throw new RunbookValidationError(file, `YAML parse error: ${(e as Error).message}`);
+  }
+  return validateRunbook(raw, file);
+}
+
+function validateRunbook(raw: unknown, file: string): Runbook {
+  if (!isObject(raw)) throw new RunbookValidationError(file, "root must be a mapping");
+
+  const id = mustString(raw, "id", file);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id))
+    throw new RunbookValidationError(file, `id must be kebab-case [a-z0-9-]+, got: ${id}`);
+
+  const description = optionalString(raw, "description", file);
+
+  const trigger = validateTrigger(raw["trigger"], file);
+  const steps = validateSteps(raw["steps"], file);
+
+  const rb: Runbook = {
+    id,
+    trigger,
+    steps,
+    sourcePath: file,
+  };
+  if (description !== undefined) rb.description = description;
+  return rb;
+}
+
+function validateTrigger(raw: unknown, file: string): Runbook["trigger"] {
+  if (!isObject(raw)) throw new RunbookValidationError(file, "trigger must be a mapping");
+  const source = mustString(raw, "source", file, "trigger.source");
+  if (source !== "file")
+    throw new RunbookValidationError(file, `trigger.source must be "file" (got: ${source})`);
+  const path = mustString(raw, "path", file, "trigger.path");
+  const patternStr = mustString(raw, "pattern", file, "trigger.pattern");
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(patternStr);
+  } catch (e) {
+    throw new RunbookValidationError(
+      file,
+      `trigger.pattern is not a valid regex: ${(e as Error).message}`,
+    );
+  }
+  return { source: "file", path, pattern };
+}
+
+function validateSteps(raw: unknown, file: string): BashStep[] {
+  if (!Array.isArray(raw) || raw.length === 0)
+    throw new RunbookValidationError(file, "steps must be a non-empty array");
+  const seen = new Set<string>();
+  return raw.map((step, i) => {
+    const path = `steps[${i}]`;
+    if (!isObject(step)) throw new RunbookValidationError(file, `${path} must be a mapping`);
+    const id = mustString(step, "id", file, `${path}.id`);
+    if (seen.has(id)) throw new RunbookValidationError(file, `duplicate step id: ${id}`);
+    seen.add(id);
+    if (!("bash" in step))
+      throw new RunbookValidationError(file, `${path} must have a bash field (only bash steps are supported in MVP)`);
+    const bash = mustString(step, "bash", file, `${path}.bash`);
+    const timeout_sec = optionalNumber(step, "timeout_sec", file, `${path}.timeout_sec`) ?? 60;
+    if (timeout_sec <= 0)
+      throw new RunbookValidationError(file, `${path}.timeout_sec must be > 0`);
+    const onErrorRaw = optionalString(step, "on_error", file, `${path}.on_error`) ?? "stop";
+    if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
+      throw new RunbookValidationError(file, `${path}.on_error must be "stop" or "continue"`);
+    const env = validateEnv(step["env"], file, `${path}.env`);
+    return { id, bash, timeout_sec, on_error: onErrorRaw, env };
+  });
+}
+
+function validateEnv(raw: unknown, file: string, ctx: string): Record<string, string> {
+  if (raw === undefined || raw === null) return {};
+  if (!isObject(raw)) throw new RunbookValidationError(file, `${ctx} must be a mapping`);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean")
+      throw new RunbookValidationError(file, `${ctx}.${k} must be a string/number/boolean`);
+    out[k] = String(v);
+  }
+  return out;
+}
+
+function assertUniqueIds(rbs: Runbook[]): void {
+  const seen = new Map<string, string>();
+  for (const rb of rbs) {
+    const prev = seen.get(rb.id);
+    if (prev) {
+      throw new RunbookValidationError(rb.sourcePath, `duplicate runbook id "${rb.id}" (also in ${prev})`);
+    }
+    seen.set(rb.id, rb.sourcePath);
+  }
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function mustString(obj: Record<string, unknown>, key: string, file: string, ctx?: string): string {
+  const v = obj[key];
+  if (typeof v !== "string" || v.length === 0)
+    throw new RunbookValidationError(file, `${ctx ?? key} must be a non-empty string`);
+  return v;
+}
+
+function optionalString(
+  obj: Record<string, unknown>,
+  key: string,
+  file: string,
+  ctx?: string,
+): string | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "string") throw new RunbookValidationError(file, `${ctx ?? key} must be a string`);
+  return v;
+}
+
+function optionalNumber(
+  obj: Record<string, unknown>,
+  key: string,
+  file: string,
+  ctx?: string,
+): number | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "number" || !Number.isFinite(v))
+    throw new RunbookValidationError(file, `${ctx ?? key} must be a finite number`);
+  return v;
+}
+
+export function dirHasFiles(path: string): boolean {
+  try {
+    const s = statSync(path);
+    return s.isDirectory();
+  } catch {
+    return false;
+  }
+}

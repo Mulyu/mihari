@@ -3,10 +3,10 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
-import pino from "pino";
+import { logger } from "./logger.js";
 import type { PollerState, RunResult, TriggerState } from "../types.js";
 
-const log = pino({ name: "mihari.state" });
+const log = logger("state");
 
 export interface StateStoreOptions {
   baseDir?: string;

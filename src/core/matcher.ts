@@ -1,25 +1,28 @@
 import { resolve } from "node:path";
-import type { LogLine, Match, Runbook } from "../types.js";
+import type { FileTrigger, Match, Runbook, TriggerEvent } from "../types.js";
 
-export function match(line: LogLine, runbooks: Runbook[]): Match[] {
-  const linePath = resolve(line.path);
+type FileRunbook = Runbook & { trigger: FileTrigger };
+
+function isFileRunbook(rb: Runbook): rb is FileRunbook {
+  return rb.trigger.source === "file";
+}
+
+export function match(
+  event: Extract<TriggerEvent, { type: "file" }>,
+  runbooks: Runbook[],
+): Match[] {
+  const eventPath = resolve(event.path);
   return runbooks
-    .filter((r) => r.trigger.source === "file")
+    .filter(isFileRunbook)
     .filter(
       (r) =>
-        r.trigger.source === "file" &&
-        resolve(r.trigger.path) === linePath &&
-        r.trigger.pattern.test(line.content),
+        resolve(r.trigger.path) === eventPath && r.trigger.pattern.test(event.content),
     )
-    .map((r) => ({ runbook: r, line }));
+    .map((r) => ({ runbook: r, event }));
 }
 
 export function uniqueTriggerPaths(runbooks: Runbook[]): string[] {
   return Array.from(
-    new Set(
-      runbooks
-        .filter((r) => r.trigger.source === "file")
-        .map((r) => resolve((r.trigger as { path: string }).path)),
-    ),
+    new Set(runbooks.filter(isFileRunbook).map((r) => resolve(r.trigger.path))),
   );
 }

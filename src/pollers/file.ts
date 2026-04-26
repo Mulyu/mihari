@@ -1,10 +1,12 @@
 import { open, stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import pino from "pino";
-import type { LogLine, PollerState } from "../types.js";
+import { logger } from "../core/logger.js";
+import type { PollerState, TriggerEvent } from "../types.js";
 import type { StateStore } from "../core/state.js";
 
-const log = pino({ name: "mihari.poller.file" });
+const log = logger("poller.file");
+
+export type FileEvent = Extract<TriggerEvent, { type: "file" }>;
 
 export interface PollDecision {
   startOffset: number;
@@ -48,7 +50,7 @@ export class FilePoller {
     private readonly state: StateStore,
   ) {}
 
-  async tick(): Promise<LogLine[]> {
+  async tick(): Promise<FileEvent[]> {
     const absPath = resolve(this.path);
     let stats;
     try {
@@ -91,7 +93,12 @@ export class FilePoller {
 
     const { lines, consumed } = splitCompleteLines(buf);
     const timestamp = new Date().toISOString();
-    const out: LogLine[] = lines.map((content) => ({ path: absPath, content, timestamp }));
+    const out: FileEvent[] = lines.map((content) => ({
+      type: "file",
+      path: absPath,
+      content,
+      timestamp,
+    }));
 
     const newOffset = decision.startOffset + consumed;
     const next: PollerState = {

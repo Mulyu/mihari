@@ -2,30 +2,26 @@
 import { Command } from "commander";
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
-import pino from "pino";
+import { logger, setLogLevel } from "./core/logger.js";
 import {
   loadRunbookFile,
   loadRunbooks,
   RunbookValidationError,
 } from "./core/runbook-loader.js";
-import { match, uniqueTriggerPaths } from "./core/matcher.js";
+import { uniqueTriggerPaths } from "./core/matcher.js";
 import { StateStore, defaultStateDir } from "./core/state.js";
-import { createExecutor } from "./core/executor.js";
+import { createExecutor, type Executor } from "./core/executor.js";
+import { tick } from "./core/dispatcher.js";
 import { FilePoller } from "./pollers/file.js";
 import { CronScheduler, cronRunbooks } from "./pollers/cron.js";
-import type { Runbook } from "./types.js";
+import type { Runbook, TriggerEvent } from "./types.js";
 
-const log = pino({ name: "mihari" });
+const log = logger("cli");
 
 interface GlobalOpts {
   runbooksDir: string;
   stateDir: string;
   logLevel: string;
-}
-
-function applyGlobals(opts: GlobalOpts): void {
-  pino.levels.values; // ensure module is initialized
-  log.level = opts.logLevel;
 }
 
 const program = new Command();
@@ -34,21 +30,22 @@ program
   .description("Local log file polling + bash runbook engine")
   .option("--runbooks-dir <path>", "runbook directory", "./runbooks")
   .option("--state-dir <path>", "state directory", defaultStateDir())
-  .option("--log-level <level>", "pino log level", process.env["MIHARI_LOG_LEVEL"] ?? "info");
+  .option("--log-level <level>", "pino log level", process.env["MIHARI_LOG_LEVEL"] ?? "info")
+  .hook("preAction", () => {
+    setLogLevel(program.opts<GlobalOpts>().logLevel);
+  });
 
 program
   .command("daemon")
   .description("loop polling all runbooks at --interval seconds")
   .option("--interval <sec>", "polling interval seconds", "10")
   .action(async (cmdOpts: { interval: string }) => {
-    const opts = program.opts<GlobalOpts>();
-    applyGlobals(opts);
     const intervalSec = Number(cmdOpts.interval);
     if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
       console.error("--interval must be > 0");
       process.exit(2);
     }
-    const ctx = await bootstrap(opts);
+    const ctx = await bootstrap(program.opts<GlobalOpts>());
     log.info({ interval_sec: intervalSec, runbooks: ctx.runbooks.length }, "daemon started");
     let stopping = false;
     const stop = (sig: NodeJS.Signals) => {
@@ -58,7 +55,7 @@ program
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     while (!stopping) {
-      await runOneTick(ctx);
+      await tick(ctx);
       if (stopping) break;
       await sleep(intervalSec * 1000);
     }
@@ -70,26 +67,25 @@ program
   .description("run all pollers once and execute matched runbooks")
   .option("--dry-run", "list matches without executing", false)
   .action(async (cmdOpts: { dryRun: boolean }) => {
-    const opts = program.opts<GlobalOpts>();
-    applyGlobals(opts);
-    const ctx = await bootstrap(opts);
-    const ok = await runOneTick(ctx, { dryRun: cmdOpts.dryRun });
-    process.exit(ok ? 0 : 1);
+    const ctx = await bootstrap(program.opts<GlobalOpts>());
+    const result = await tick(ctx, {
+      ...(cmdOpts.dryRun ? { dryRun: true, onDryRun: (m) => console.log(`[dry-run] ${m}`) } : {}),
+    });
+    process.exit(result.ok ? 0 : 1);
   });
 
 program
   .command("run <id>")
   .description("execute a runbook by id without a trigger")
   .action(async (id: string) => {
-    const opts = program.opts<GlobalOpts>();
-    applyGlobals(opts);
-    const ctx = await bootstrap(opts);
+    const ctx = await bootstrap(program.opts<GlobalOpts>());
     const rb = ctx.runbooks.find((r) => r.id === id);
     if (!rb) {
       console.error(`runbook not found: ${id}`);
       process.exit(1);
     }
-    const result = await ctx.executor.executeBare(rb);
+    const event: TriggerEvent = { type: "manual", timestamp: new Date().toISOString() };
+    const result = await ctx.executor.execute(rb, event);
     process.exit(result.ok ? 0 : 1);
   });
 
@@ -97,9 +93,7 @@ program
   .command("list")
   .description("list runbooks")
   .action(async () => {
-    const opts = program.opts<GlobalOpts>();
-    applyGlobals(opts);
-    const ctx = await bootstrap(opts);
+    const ctx = await bootstrap(program.opts<GlobalOpts>());
     if (ctx.runbooks.length === 0) {
       console.log("(no runbooks)");
       return;
@@ -143,7 +137,7 @@ program
 interface Ctx {
   runbooks: Runbook[];
   state: StateStore;
-  executor: ReturnType<typeof createExecutor>;
+  executor: Executor;
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
 }
@@ -169,35 +163,6 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
   const pollers = uniqueTriggerPaths(runbooks).map((p) => new FilePoller(p, state));
   const cronSchedulers = cronRunbooks(runbooks).map((rb) => new CronScheduler(rb, state));
   return { runbooks, state, executor, pollers, cronSchedulers };
-}
-
-async function runOneTick(ctx: Ctx, opts: { dryRun?: boolean } = {}): Promise<boolean> {
-  let allOk = true;
-  for (const poller of ctx.pollers) {
-    const lines = await poller.tick();
-    for (const line of lines) {
-      const matches = match(line, ctx.runbooks);
-      for (const m of matches) {
-        if (opts.dryRun) {
-          console.log(`[dry-run] ${m.runbook.id} <- ${line.path}: ${line.content}`);
-          continue;
-        }
-        const result = await ctx.executor.execute(m);
-        if (!result.ok) allOk = false;
-      }
-    }
-  }
-  for (const scheduler of ctx.cronSchedulers) {
-    const fired = await scheduler.tick();
-    if (!fired) continue;
-    if (opts.dryRun) {
-      console.log(`[dry-run] ${scheduler.runbook.id} <- cron@${fired.timestamp}`);
-      continue;
-    }
-    const result = await ctx.executor.execute({ runbook: scheduler.runbook, line: fired });
-    if (!result.ok) allOk = false;
-  }
-  return allOk;
 }
 
 function sleep(ms: number): Promise<void> {

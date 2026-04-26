@@ -1,13 +1,15 @@
 import { Cron } from "croner";
-import pino from "pino";
-import type { CronTrigger, LogLine, Runbook, TriggerState } from "../types.js";
+import { logger } from "../core/logger.js";
+import type { CronTrigger, Runbook, TriggerEvent, TriggerState } from "../types.js";
 import type { StateStore } from "../core/state.js";
 
-const log = pino({ name: "mihari.poller.cron" });
+const log = logger("poller.cron");
+
+export type CronEvent = Extract<TriggerEvent, { type: "cron" }>;
 
 export interface CronDecision {
   fire: boolean;
-  // Updated last_fired_at to persist (only updated when fire is true or on first observation).
+  // newLastFiredAt が null のときは state を更新しない。
   newLastFiredAt: string | null;
 }
 
@@ -29,20 +31,22 @@ export function decideCronFire(
   return { fire: false, newLastFiredAt: null };
 }
 
+type CronRunbook = Runbook & { trigger: CronTrigger };
+
+function isCronRunbook(rb: Runbook): rb is CronRunbook {
+  return rb.trigger.source === "cron";
+}
+
 export class CronScheduler {
   private readonly schedule: Cron;
   constructor(
-    public readonly runbook: Runbook,
+    public readonly runbook: CronRunbook,
     private readonly state: StateStore,
   ) {
-    if (runbook.trigger.source !== "cron") {
-      throw new Error(`runbook ${runbook.id} is not a cron trigger`);
-    }
-    const cronTrigger = runbook.trigger as CronTrigger;
-    this.schedule = new Cron(cronTrigger.schedule);
+    this.schedule = new Cron(runbook.trigger.schedule);
   }
 
-  async tick(now: Date = new Date()): Promise<LogLine | null> {
+  async tick(now: Date = new Date()): Promise<CronEvent | null> {
     const prev = this.state.loadTriggerState(this.runbook.id);
     const decision = decideCronFire(this.schedule, prev, now);
 
@@ -59,10 +63,10 @@ export class CronScheduler {
       { runbook_id: this.runbook.id, fired_at: decision.newLastFiredAt },
       "cron trigger fired",
     );
-    return { path: "", content: "", timestamp: decision.newLastFiredAt ?? now.toISOString() };
+    return { type: "cron", timestamp: decision.newLastFiredAt ?? now.toISOString() };
   }
 }
 
-export function cronRunbooks(runbooks: Runbook[]): Runbook[] {
-  return runbooks.filter((r) => r.trigger.source === "cron");
+export function cronRunbooks(runbooks: Runbook[]): CronRunbook[] {
+  return runbooks.filter(isCronRunbook);
 }

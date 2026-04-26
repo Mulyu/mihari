@@ -30,6 +30,10 @@ steps:                                # 必須
 
 ## トリガー
 
+`source` に `file` または `cron` を指定する。
+
+### `file`
+
 ```yaml
 trigger:
   source: file
@@ -39,11 +43,43 @@ trigger:
 
 | フィールド | 内容 |
 |----------|------|
-| `source` | `file` のみ（MVP） |
+| `source` | `file` |
 | `path` | 監視するログファイルの絶対パス |
 | `pattern` | 行に対する正規表現。マッチで発火 |
 
 複数ランブックが同一行にマッチしたら **全て順次実行**（並列ではない、シンプルさ優先）。
+
+### `cron`
+
+```yaml
+trigger:
+  source: cron
+  schedule: "*/5 * * * *"
+```
+
+| フィールド | 内容 |
+|----------|------|
+| `source` | `cron` |
+| `schedule` | 5フィールドのcron式（`croner` で解釈） |
+
+時刻ベースの定期実行。HTTP合成監視は `bash` ステップで `curl` を呼ぶことで実現する：
+
+```yaml
+id: api-health
+trigger:
+  source: cron
+  schedule: "*/5 * * * *"
+steps:
+  - id: probe
+    bash: |
+      curl -fsS --max-time 5 https://api.example.com/health > /tmp/last.json
+      grep -q '"status":"ok"' /tmp/last.json
+    timeout_sec: 10
+```
+
+**起動時挙動**: stateが無いとき（初回観測）は発火せず、次のスロットを待つ。手動テストは `mihari run <id>` を使う。
+
+**重複・取りこぼし**: cron発火中にプロセスが落ちても、再起動後は次のスロットで発火する。1ティックで複数スロットが過ぎていても**発火は1回**（catch-upしない）。
 
 ## ステップ
 
@@ -71,14 +107,16 @@ stdoutとstderrはmihariのログに記録される。
 
 ## 変数
 
-トリガーでマッチした行から変数を渡せる：
+トリガーから変数を渡せる：
 
-| 変数 | 内容 |
-|------|------|
-| `{{ event.line }}` | マッチした行の全文 |
-| `{{ event.path }}` | ログファイルのパス |
-| `{{ event.timestamp }}` | mihariが行を読んだ時刻（ISO8601） |
-| `{{ env.<NAME> }}` | 環境変数 |
+| 変数 | `file` | `cron` |
+|------|--------|--------|
+| `{{ event.line }}` | マッチした行の全文 | 空文字 |
+| `{{ event.path }}` | ログファイルのパス | 空文字 |
+| `{{ event.timestamp }}` | mihariが行を読んだ時刻 | 発火時刻 |
+| `{{ env.<NAME> }}` | 環境変数 | 環境変数 |
+
+時刻は ISO8601。`{{ event.* }}` はシェル展開時に**環境変数経由**で渡されるため、ログ行に注入文字列が混ざっても安全。
 
 例：
 

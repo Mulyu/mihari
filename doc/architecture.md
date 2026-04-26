@@ -1,6 +1,6 @@
 # Architecture
 
-mihari の実行アーキテクチャ。MVPスコープ（ローカルログのポーリング + bashランブック）に絞った設計。
+mihari の実行アーキテクチャ。ローカルログのポーリングと cron スケジュールから bash ランブックを起動する。
 
 ## 全体像
 
@@ -16,30 +16,35 @@ mihari の実行アーキテクチャ。MVPスコープ（ローカルログの�
 │ RunbookLoader│             │   StateStore │
 │ runbooks/*.yml│             │ ~/.mihari/   │
 └──────┬───────┘             └──────┬───────┘
-       │ Runbook[]                  │ offset, dedup
+       │ Runbook[]                  │
        ▼                            │
 ┌──────────────┐                    │
-│  FilePoller  │◄───────────────────┤
+│  FilePoller  │◄───────────────────┤  offset/inode/size
 │ tail / offset│                    │
 └──────┬───────┘                    │
        │ LogLine[]                  │
        ▼                            │
 ┌──────────────┐                    │
-│   Matcher    │ Runbook + LogLine  │
+│   Matcher    │                    │
 │  regex eval  │                    │
 └──────┬───────┘                    │
        │ Match[]                    │
        ▼                            │
 ┌──────────────┐                    │
-│   Executor   │────────────────────┘
-│  step loop   │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│   BashStep   │
-│ child_process│
-└──────────────┘
+│   Executor   │◄───────────────────┤
+│  step loop   │                    │
+└──────┬───────┘                    │
+       ▲                            │
+       │ Match (synth)              │
+┌──────┴───────┐                    │
+│CronScheduler │◄───────────────────┤  last_fired_at
+│ croner / tick│                    │
+└──────────────┘                    │
+                                    ▼
+                             ┌──────────────┐
+                             │   BashStep   │
+                             │ child_process│
+                             └──────────────┘
 ```
 
 ## コンポーネント
@@ -93,6 +98,40 @@ function match(line: LogLine, runbooks: Runbook[]): Match[] {
 
 複数ランブックがマッチしたら **すべて順次実行**（並列にしない、シンプルさ優先）。
 
+### `pollers/cron.ts`
+
+時刻ベースのトリガー。`croner` で cron 式を解釈し、`tick(now)` で発火判定する。
+
+#### 状態
+
+`~/.mihari/state/triggers/<sha1(runbook_id)>.json`：
+
+```json
+{
+  "runbook_id": "api-health",
+  "last_fired_at": "2026-04-26T01:23:45Z"
+}
+```
+
+#### 発火ロジック
+
+```ts
+function decideCronFire(schedule: Cron, prev: TriggerState | null, now: Date): CronDecision {
+  if (prev === null) {
+    // 初回観測は発火しない（next スロットを待つ）。state だけシードする。
+    return { fire: false, newLastFiredAt: now.toISOString() };
+  }
+  const next = schedule.nextRun(new Date(prev.last_fired_at));
+  if (next && next.getTime() <= now.getTime()) {
+    // 1ティックで複数スロット過ぎていても発火は1回だけ（catch-up しない）
+    return { fire: true, newLastFiredAt: now.toISOString() };
+  }
+  return { fire: false, newLastFiredAt: null };
+}
+```
+
+cron トリガーは Matcher を経由しない。発火したら直接 Executor に渡す。`event.line` `event.path` は空文字、`event.timestamp` だけが意味を持つ。
+
 ### `pollers/file.ts`
 
 ログファイルを tail する。重要な判断はここに集約。
@@ -140,10 +179,12 @@ function match(line: LogLine, runbooks: Runbook[]): Match[] {
 ```
 ~/.mihari/state/
 ├── pollers/
-│   └── <sha1(path)>.json    # FilePoller オフセット
+│   └── <sha1(path)>.json         # FilePoller オフセット
+├── triggers/
+│   └── <sha1(runbook_id)>.json   # CronScheduler last_fired_at
 └── runs/
     └── <YYYY-MM-DD>/
-        └── <run_id>.jsonl   # 実行履歴（任意で参照）
+        └── <run_id>.jsonl        # 実行履歴
 ```
 
 書き込みは `proper-lockfile` でファイルロック → tmp file に書く → `rename()` で atomic に置換。
@@ -200,15 +241,20 @@ async function execute(match: Match): Promise<RunResult> {
 
 ```
 load runbooks
-  └→ build FilePoller list (unique trigger.path)
+  └→ build FilePoller list (unique file.path)
+  └→ build CronScheduler list (one per cron runbook)
 load state
 loop:
-  for poller in pollers:                  # 逐次
-    lines = poller.tick()                 # state I/O はこの中で完結
+  for poller in file_pollers:             # 逐次
+    lines = poller.tick()
     for line in lines:
       matches = matcher.match(line, runbooks)
       for m in matches:
-        await executor.execute(m)         # 逐次
+        await executor.execute(m)
+  for scheduler in cron_schedulers:       # 逐次
+    fired = scheduler.tick()
+    if fired:
+      await executor.execute({ runbook: scheduler.runbook, line: fired })
   sleep(--interval)
 on SIGINT:
   finish current step

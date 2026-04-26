@@ -119,6 +119,40 @@ steps:
   });
 });
 
+describe("cron triggers", () => {
+  const VALID_CRON = `
+id: hourly-check
+trigger:
+  source: cron
+  schedule: "0 * * * *"
+steps:
+  - id: probe
+    bash: curl -fsS https://example.com/health
+`.trim();
+
+  it("loads a valid cron trigger", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_CRON);
+    const rb = loadRunbookFile(f);
+    expect(rb.trigger.source).toBe("cron");
+    if (rb.trigger.source === "cron") {
+      expect(rb.trigger.schedule).toBe("0 * * * *");
+    }
+  });
+
+  it("rejects invalid cron expressions", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_CRON.replace('"0 * * * *"', '"not a cron"'));
+    expect(() => loadRunbookFile(f)).toThrow(/not a valid cron/);
+  });
+
+  it("rejects unsupported source", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_CRON.replace("source: cron", "source: webhook"));
+    expect(() => loadRunbookFile(f)).toThrow(/source must be/);
+  });
+});
+
 describe("loadRunbooks", () => {
   it("loads all yaml files in a dir, ignores non-yaml", () => {
     writeFileSync(join(dir, "a.yaml"), VALID_YAML.replace("cleanup", "first"));

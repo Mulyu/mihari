@@ -1,0 +1,33 @@
+id: ssh-failed-login
+description: SSH 認証失敗の検知（fail2ban の手前で粗い見える化）
+
+trigger:
+  source: file
+  path: /var/log/auth.log
+  pattern: "Failed password for .* from "
+
+steps:
+  # 試行を別ファイルに追記してカウントしやすくする。
+  - id: record_attempt
+    bash: |
+      mkdir -p /var/log/mihari
+      printf '%s\t%s\n' "$(date -u --iso-8601=seconds)" "{{ event.line }}" \
+        >> /var/log/mihari/ssh-attempts.log
+    timeout_sec: 5
+    on_error: continue
+
+  # 直近1分の試行回数が閾値を超えたら通知用ファイルにフラグを立てる。
+  # 通知方法はサイトごとに差し替える前提で、ここではファイルだけ作る。
+  - id: flag_burst
+    bash: |
+      threshold=10
+      window_sec=60
+      now=$(date -u +%s)
+      since=$(date -u -d "@$((now - window_sec))" --iso-8601=seconds)
+      count=$(awk -v since="$since" '$1 >= since' /var/log/mihari/ssh-attempts.log | wc -l)
+      if [ "$count" -ge "$threshold" ]; then
+        printf '%s\tcount=%d\n' "$(date -u --iso-8601=seconds)" "$count" \
+          > /var/log/mihari/ssh-burst.flag
+      fi
+    timeout_sec: 5
+    on_error: continue

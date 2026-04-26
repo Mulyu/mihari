@@ -108,6 +108,56 @@ program
   });
 
 program
+  .command("history [run_id]")
+  .description("show run history (or details of a single run)")
+  .option("--runbook <id>", "filter by runbook id")
+  .option("--limit <n>", "max records (default 20)", "20")
+  .option("--since <date>", "only show runs on or after YYYY-MM-DD")
+  .option("--json", "emit JSON")
+  .action(
+    async (
+      runId: string | undefined,
+      cmdOpts: { runbook?: string; limit: string; since?: string; json?: boolean },
+    ) => {
+      const ctx = await bootstrap(program.opts<GlobalOpts>());
+      if (runId) {
+        const run = ctx.state.getRun(runId);
+        if (!run) {
+          console.error(`run not found: ${runId}`);
+          process.exit(1);
+        }
+        console.log(JSON.stringify(run, null, 2));
+        return;
+      }
+      const limit = Number(cmdOpts.limit);
+      if (!Number.isFinite(limit) || limit <= 0) {
+        console.error("--limit must be > 0");
+        process.exit(2);
+      }
+      const runs = ctx.state.listRuns({
+        limit,
+        ...(cmdOpts.runbook ? { runbookId: cmdOpts.runbook } : {}),
+        ...(cmdOpts.since ? { since: cmdOpts.since } : {}),
+      });
+      if (cmdOpts.json) {
+        console.log(JSON.stringify(runs, null, 2));
+        return;
+      }
+      if (runs.length === 0) {
+        console.log("(no runs)");
+        return;
+      }
+      for (const r of runs) {
+        const status = r.ok ? "ok" : "FAIL";
+        const dur = r.steps.reduce((s, x) => s + x.duration_ms, 0);
+        console.log(
+          `${r.started_at}\t${r.run_id}\t${r.runbook_id}\t${status}\t${dur}ms`,
+        );
+      }
+    },
+  );
+
+program
   .command("validate <path>")
   .description("validate a runbook file or directory")
   .action(async (path: string) => {

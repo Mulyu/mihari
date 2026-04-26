@@ -1,0 +1,35 @@
+id: backup-freshness
+description: バックアップファイルが直近24時間以内に更新されているか毎朝チェック
+
+trigger:
+  source: cron
+  schedule: "0 9 * * *"
+
+steps:
+  - id: check_age
+    bash: |
+      backup=/var/backups/db.sql.gz
+      if [ ! -f "$backup" ]; then
+        echo "missing: $backup"
+        exit 1
+      fi
+      age=$(($(date -u +%s) - $(stat -c %Y "$backup")))
+      max_age=$((24 * 3600))
+      if [ "$age" -gt "$max_age" ]; then
+        echo "stale: $backup is ${age}s old (max ${max_age}s)"
+        exit 1
+      fi
+      echo "ok: $backup age=${age}s"
+    timeout_sec: 10
+    on_error: stop
+
+  # 異常時は別の通知ランブックなどに繋ぐ前提でフラグだけ立てる。
+  # check_age が落ちると on_error: stop でここに来ないので注意。
+  # 通知を確実に送りたい場合は check_age を on_error: continue にして、
+  # ここでチェック結果を見て分岐する形にすれば良い。
+  - id: log_ok
+    bash: |
+      printf '%s\tbackup ok\n' "{{ event.timestamp }}" \
+        >> /var/log/mihari/backup-checks.log
+    timeout_sec: 5
+    on_error: continue

@@ -41,20 +41,71 @@ describe("StateStore poller state", () => {
   });
 });
 
+function makeRun(id: string, runbookId: string, startedAt: string, ok = true): RunResult {
+  return {
+    run_id: id,
+    runbook_id: runbookId,
+    started_at: startedAt,
+    finished_at: startedAt,
+    ok,
+    steps: [],
+    trigger_event: { type: "manual", timestamp: startedAt },
+  };
+}
+
 describe("StateStore run results", () => {
   it("appends run results into per-day jsonl", async () => {
     const s = new StateStore({ baseDir: dir });
-    const r: RunResult = {
-      run_id: "run_test",
-      runbook_id: "rb",
-      started_at: "2026-04-26T00:00:00Z",
-      finished_at: "2026-04-26T00:00:01Z",
-      ok: true,
-      steps: [],
-      trigger_line: "x",
-    };
-    await s.appendRunResult(r);
-    // not throwing is the contract; we verify the directory exists
+    await s.appendRunResult(makeRun("run_test", "rb", "2026-04-26T00:00:00Z"));
     expect(s.baseDir).toBe(dir);
+  });
+
+  it("listRuns returns empty when no records exist", () => {
+    const s = new StateStore({ baseDir: dir });
+    expect(s.listRuns()).toEqual([]);
+  });
+
+  it("listRuns returns most recent first across days", async () => {
+    const s = new StateStore({ baseDir: dir });
+    await s.appendRunResult(makeRun("run_a", "rb1", "2026-04-25T10:00:00Z"));
+    await s.appendRunResult(makeRun("run_b", "rb1", "2026-04-26T08:00:00Z"));
+    await s.appendRunResult(makeRun("run_c", "rb2", "2026-04-26T09:00:00Z"));
+    const got = s.listRuns();
+    expect(got.map((r) => r.run_id)).toEqual(["run_c", "run_b", "run_a"]);
+  });
+
+  it("listRuns honors --runbook filter", async () => {
+    const s = new StateStore({ baseDir: dir });
+    await s.appendRunResult(makeRun("run_a", "rb1", "2026-04-25T10:00:00Z"));
+    await s.appendRunResult(makeRun("run_b", "rb2", "2026-04-26T10:00:00Z"));
+    expect(s.listRuns({ runbookId: "rb1" }).map((r) => r.run_id)).toEqual(["run_a"]);
+  });
+
+  it("listRuns honors --since filter", async () => {
+    const s = new StateStore({ baseDir: dir });
+    await s.appendRunResult(makeRun("run_a", "rb", "2026-04-25T10:00:00Z"));
+    await s.appendRunResult(makeRun("run_b", "rb", "2026-04-26T10:00:00Z"));
+    expect(s.listRuns({ since: "2026-04-26" }).map((r) => r.run_id)).toEqual(["run_b"]);
+  });
+
+  it("listRuns honors --limit", async () => {
+    const s = new StateStore({ baseDir: dir });
+    for (let i = 0; i < 5; i++) {
+      await s.appendRunResult(makeRun(`run_${i}`, "rb", `2026-04-26T0${i}:00:00Z`));
+    }
+    expect(s.listRuns({ limit: 2 })).toHaveLength(2);
+  });
+
+  it("getRun finds the run regardless of date dir", async () => {
+    const s = new StateStore({ baseDir: dir });
+    await s.appendRunResult(makeRun("run_target", "rb", "2026-04-20T10:00:00Z"));
+    await s.appendRunResult(makeRun("run_other", "rb", "2026-04-26T10:00:00Z"));
+    const got = s.getRun("run_target");
+    expect(got?.run_id).toBe("run_target");
+  });
+
+  it("getRun returns null for unknown ids", () => {
+    const s = new StateStore({ baseDir: dir });
+    expect(s.getRun("nope")).toBeNull();
   });
 });

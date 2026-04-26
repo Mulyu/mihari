@@ -7,7 +7,8 @@ mihari の実行アーキテクチャ。ローカルログのポーリングと 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                       CLI                            │
-│        mihari daemon | poll | run | list             │
+│   mihari daemon | poll | run | list | validate       │
+│                       history                        │
 └──────────────────────┬──────────────────────────────┘
                        │
         ┌──────────────┴──────────────┐
@@ -18,67 +19,94 @@ mihari の実行アーキテクチャ。ローカルログのポーリングと 
 └──────┬───────┘             └──────┬───────┘
        │ Runbook[]                  │
        ▼                            │
-┌──────────────┐                    │
-│  FilePoller  │◄───────────────────┤  offset/inode/size
-│ tail / offset│                    │
-└──────┬───────┘                    │
-       │ LogLine[]                  │
-       ▼                            │
-┌──────────────┐                    │
-│   Matcher    │                    │
-│  regex eval  │                    │
-└──────┬───────┘                    │
-       │ Match[]                    │
-       ▼                            │
-┌──────────────┐                    │
-│   Executor   │◄───────────────────┤
-│  step loop   │                    │
-└──────┬───────┘                    │
-       ▲                            │
-       │ Match (synth)              │
-┌──────┴───────┐                    │
-│CronScheduler │◄───────────────────┤  last_fired_at
-│ croner / tick│                    │
-└──────────────┘                    │
-                                    ▼
-                             ┌──────────────┐
-                             │   BashStep   │
-                             │ child_process│
-                             └──────────────┘
+┌──────────────────────────────┐    │
+│           Dispatcher          │    │
+│  tick(input, opts):           │    │
+│    file pollers → matcher     │    │
+│    cron schedulers → executor │    │
+└──┬─────────────────┬──────────┘    │
+   │ FileEvent[]     │ CronEvent     │
+   ▼                 ▼               │
+┌──────────────┐  ┌──────────────┐   │
+│  FilePoller  │  │CronScheduler │◄──┤  state I/O
+│ tail / offset│  │ croner / tick│   │
+└──────┬───────┘  └──────┬───────┘   │
+       └────┬────────────┘           │
+            ▼                        │
+      ┌──────────┐                   │
+      │ Matcher  │ (file 専用)        │
+      │ regex eval│                  │
+      └─────┬────┘                   │
+            ▼                        │
+      ┌──────────┐                   │
+      │ Executor │◄──────────────────┤  appendRunResult
+      │ step loop│                   │
+      └─────┬────┘                   │
+            ▼                        │
+      ┌──────────┐                   │
+      │ BashStep │                   │
+      │child_proc│                   │
+      └──────────┘                   ▼
+                              ┌──────────────┐
+                              │  Logger (root)│
+                              │ pino w/ child │
+                              └──────────────┘
 ```
 
 ## コンポーネント
 
 ### `cli.ts`
 
-`commander` でサブコマンド分岐。各コマンドは下のコンポーネントを組み立てるだけで、ロジックはコアに置く。
+`commander` でサブコマンド分岐。`bootstrap()` で各コンポーネントを組み立て、`dispatcher.tick()` を呼ぶ薄い層。
 
 | サブコマンド | 動作 |
 |-------------|------|
 | `daemon` | ループで `tick()` を `--interval` 秒ごとに呼ぶ |
-| `poll` | `tick()` を1回だけ呼ぶ |
-| `run <id>` | 指定ランブックの steps だけを実行（FilePoller/Matcher 経由しない） |
-| `list` | RunbookLoader が読んだメタを表示 |
+| `poll` | `tick()` を1回だけ呼ぶ（`--dry-run` 対応） |
+| `run <id>` | 指定ランブックを `{type: "manual"}` イベントで直接 Executor へ |
+| `list` | RunbookLoader が読んだランブックのトリガーサマリを表示 |
 | `validate <path>` | YAMLパース + スキーマ検証のみ |
+| `history [run_id]` | StateStore.listRuns / getRun の薄いラッパ |
+
+`preAction` フックで `setLogLevel()` を呼ぶことで全モジュールにログレベルを伝播する。
+
+### `core/logger.ts`
+
+`pino` の root インスタンスを保持し、各モジュールに child を配る。
+
+```ts
+const root = pino({ name: "mihari" });
+export function logger(component: string) {
+  return root.child({ component });
+}
+export function setLogLevel(level: string) {
+  root.level = level;
+}
+```
+
+子は親 level を継承するので、`setLogLevel("debug")` で全モジュールの出力が増える。
 
 ### `core/runbook-loader.ts`
 
 `runbooks/*.yaml` を読み、内部表現の `Runbook[]` を返す。
 
 ```ts
+type Trigger = FileTrigger | CronTrigger;
+
 interface Runbook {
   id: string;
   description?: string;
-  trigger: { source: 'file'; path: string; pattern: RegExp };
+  trigger: Trigger;
   steps: BashStep[];
+  sourcePath: string;
 }
 
 interface BashStep {
   id: string;
   bash: string;
-  timeout_sec: number;        // default 60
-  on_error: 'stop' | 'continue';
-  env?: Record<string, string>;
+  timeout_sec: number;
+  on_error: "stop" | "continue";
+  env: Record<string, string>;
 }
 ```
 
@@ -86,21 +114,82 @@ YAMLパース失敗・スキーマ違反は **起動時に投げる**（fail-clo
 
 ### `core/matcher.ts`
 
-`LogLine` と `Runbook[]` を受け、マッチしたペア `Match[]` を返す純粋関数。
+`FileEvent` と `Runbook[]` を受け、マッチした `Match[]` を返す純粋関数。`isFileRunbook` 型ガードで cron ランブックを排除する。
 
 ```ts
-function match(line: LogLine, runbooks: Runbook[]): Match[] {
+function match(event: FileEvent, runbooks: Runbook[]): Match[] {
+  const eventPath = resolve(event.path);
   return runbooks
-    .filter(r => r.trigger.path === line.path && r.trigger.pattern.test(line.content))
-    .map(r => ({ runbook: r, line }));
+    .filter(isFileRunbook)
+    .filter((r) => resolve(r.trigger.path) === eventPath && r.trigger.pattern.test(event.content))
+    .map((r) => ({ runbook: r, event }));
 }
 ```
 
 複数ランブックがマッチしたら **すべて順次実行**（並列にしない、シンプルさ優先）。
 
+### `core/dispatcher.ts`
+
+`runOneTick` 相当のドメインロジック。テスト容易性のため CLI から切り出してある。
+
+```ts
+async function tick(input, opts): Promise<{ ok: boolean; fired: number }> {
+  for (const poller of input.pollers) {
+    const events = await poller.tick();
+    for (const event of events) {
+      for (const m of match(event, input.runbooks)) {
+        await input.executor.execute(m.runbook, m.event);
+      }
+    }
+  }
+  for (const scheduler of input.cronSchedulers) {
+    const event = await scheduler.tick();
+    if (event) await input.executor.execute(scheduler.runbook, event);
+  }
+}
+```
+
+`opts.dryRun` のときは `executor.execute` を呼ばずに `onDryRun` コールバックでメッセージを返す。
+
+### `pollers/file.ts`
+
+ログファイルを tail する。`FileEvent[]`（`TriggerEvent` の `type: "file"` 部分集合）を返す。
+
+#### オフセット管理
+
+ファイルごとに `~/.mihari/state/pollers/<sha1(path)>.json` に保存：
+
+```json
+{
+  "path": "/var/log/myapp.log",
+  "inode": 12345,
+  "size": 4096,
+  "offset": 4000,
+  "updated_at": "2026-04-26T01:23:45Z"
+}
+```
+
+#### 1ティックの動作
+
+1. `fs.stat(path)` で `inode` と `size` を取得
+2. state と突き合わせて以下を判定：
+
+| 状態 | 判定 | 対応 |
+|-----|------|------|
+| stateなし | 初回 | **末尾から**スタート（過去ログを巻き戻さない）。`offset = size` |
+| `inode` 変化 | ローテーション（`mv` + 新規作成） | `offset = 0` で新ファイルを最初から |
+| `size < offset` | truncate（`>` リダイレクト等） | `offset = 0` |
+| `size > offset` | 通常追記 | `offset` から `size` まで読む |
+| `size == offset` | 変化なし | 何もしない |
+
+3. 範囲を `read` で取得し、改行で行に分解
+4. 末尾の改行未確定行はバッファに残し、次回ティックで連結（v1: 行末改行が来てから処理）
+5. `FileEvent[]` を返す（`{ type: "file", path, content, timestamp }`）
+6. 全行処理後に新しい `offset/inode/size` を state に書く
+
 ### `pollers/cron.ts`
 
-時刻ベースのトリガー。`croner` で cron 式を解釈し、`tick(now)` で発火判定する。
+時刻ベースのトリガー。`croner` で cron 式を解釈し、`tick(now)` で発火判定する。`CronEvent`（`{ type: "cron", timestamp }`）を返す。
 
 #### 状態
 
@@ -130,47 +219,7 @@ function decideCronFire(schedule: Cron, prev: TriggerState | null, now: Date): C
 }
 ```
 
-cron トリガーは Matcher を経由しない。発火したら直接 Executor に渡す。`event.line` `event.path` は空文字、`event.timestamp` だけが意味を持つ。
-
-### `pollers/file.ts`
-
-ログファイルを tail する。重要な判断はここに集約。
-
-#### オフセット管理
-
-ファイルごとに `~/.mihari/state/pollers/<sha1(path)>.json` に保存：
-
-```json
-{
-  "path": "/var/log/myapp.log",
-  "inode": 12345,
-  "size": 4096,
-  "offset": 4000,
-  "updated_at": "2026-04-26T01:23:45Z"
-}
-```
-
-#### 1ティックの動作
-
-1. `fs.stat(path)` で `inode` と `size` を取得
-2. state と突き合わせて以下を判定：
-
-| 状態 | 判定 | 対応 |
-|-----|------|------|
-| stateなし | 初回 | **末尾から**スタート（過去ログを巻き戻さない）。`offset = size` |
-| `inode` 変化 | ローテーション（`mv` + 新規作成） | `offset = 0` で新ファイルを最初から |
-| `size < offset` | truncate（`>` リダイレクト等） | `offset = 0` |
-| `size > offset` | 通常追記 | `offset` から `size` まで読む |
-| `size == offset` | 変化なし | 何もしない |
-
-3. 範囲を `read` で取得し、改行で `LogLine[]` に分解
-4. 末尾の改行未確定行はバッファに残し、次回ティックで連結（v1では未実装、行末改行が来てから処理）
-5. 1行ごとに Matcher → Executor を呼ぶ
-6. 全行処理完了後に新しい `offset/inode/size` を state に書く
-
-#### マルチファイル
-
-`runbooks/` 内に複数ファイルが trigger.path で指定されていたら、**ファイル単位は逐次**でポーリング。並列にすると state ロック競合が増えるため。
+cron トリガーは Matcher を経由しない。発火したら直接 Executor に渡す。
 
 ### `core/state.ts`
 
@@ -189,51 +238,64 @@ cron トリガーは Matcher を経由しない。発火したら直接 Executor
 
 書き込みは `proper-lockfile` でファイルロック → tmp file に書く → `rename()` で atomic に置換。
 
+主要 API:
+
+| メソッド | 用途 |
+|---------|------|
+| `loadPollerState(path)` / `savePollerState(state)` | FilePoller |
+| `loadTriggerState(rbId)` / `saveTriggerState(state)` | CronScheduler |
+| `appendRunResult(result)` | Executor |
+| `listRuns(opts)` | history コマンド（最新順、limit/since/runbookId 絞り込み） |
+| `getRun(runId)` | history `<run_id>` コマンド |
+
 #### fail-open
 
-state 書き込み失敗は `pino.warn` でログだけ残し、処理は続行する。state破損で全ポーリングが止まるほうが運用上のリスクが大きい。
+state 書き込み失敗は warn ログだけ残し、処理は続行する。state破損で全ポーリングが止まるほうが運用上のリスクが大きい。
 
 例外: 起動時のディレクトリ作成失敗（権限ミスなど）は **投げる**。普通の運用で起きる失敗じゃないため。
 
-### `steps/bash-step.ts`
-
-`child_process.spawn('bash', ['-c', step.bash], { env, timeout })` で実行。
-
-- stdout / stderr は `pino` に流して `runs/<date>/<run_id>.jsonl` にも記録
-- exit 0 以外は失敗
-- timeout は `AbortController` か `spawn`の`timeout`オプション
-- `on_error: stop` なら以降のステップを実行しない、`continue` なら次へ
-
-#### テンプレ展開
-
-`{{ event.line }}` `{{ event.path }}` `{{ event.timestamp }}` を **実行直前**に文字列置換。シェル注入を避けるため、置換値は `bash` の **環境変数経由**で渡す：
-
-```ts
-spawn('bash', ['-c', step.bash], {
-  env: { ...process.env, ...step.env, MIHARI_EVENT_LINE: line.content, MIHARI_EVENT_PATH: line.path, MIHARI_EVENT_TIMESTAMP: ts }
-});
-```
-
-ユーザーが書く YAML 側で `{{ event.line }}` を見たら **`"$MIHARI_EVENT_LINE"`** に変換してスクリプトに渡す。これでログ行に `;rm -rf` が混ざっても安全。
-
 ### `core/executor.ts`
 
-Match を受けてステップを順次実行する：
+`execute(runbook, event)` でステップを順次実行する。`event` は `TriggerEvent` 識別共用体（file/cron/manual）。
 
 ```ts
-async function execute(match: Match): Promise<RunResult> {
-  const runId = newRunId();
-  const ctx = makeContext(match);                    // {event: {...}, env: ...}
-  for (const step of match.runbook.steps) {
-    const result = await runBashStep(step, ctx);
-    recordStepResult(runId, step.id, result);
-    if (!result.ok && step.on_error === 'stop') break;
-  }
-  return summarize(runId);
+interface Executor {
+  execute(runbook: Runbook, event: TriggerEvent): Promise<RunResult>;
 }
 ```
 
+`on_error: "stop"` なら最初の失敗で打ち切り、`"continue"` なら次のステップへ進む。`RunResult` には `trigger_event` を埋めて `state.appendRunResult` で永続化する。
+
 ランブック単位でロックは取らない。複数Pollerティックで同じイベントを2回拾う可能性はあるが、**重複実行は許容**するMVP方針。
+
+### `steps/bash-step.ts`
+
+`child_process.spawn('bash', ['-c', script])` で実行。
+
+- stdout / stderr は `pino` に流して `runs/<date>/<run_id>.jsonl` にも記録
+- exit 0 以外は失敗
+- timeout: SIGTERM → 1秒後に SIGKILL
+- `on_error` は Executor 側で処理
+
+#### テンプレ展開
+
+`{{ event.line }}` `{{ event.path }}` `{{ event.timestamp }}` `{{ env.NAME }}` を **実行直前**にシェル展開可能な形に置き換える。シェル注入を避けるため、置換値は **環境変数経由**で渡す：
+
+```ts
+spawn('bash', ['-c', script], {
+  env: {
+    ...process.env,
+    ...step.env,
+    MIHARI_EVENT_LINE: event.type === "file" ? event.content : "",
+    MIHARI_EVENT_PATH: event.type === "file" ? event.path : "",
+    MIHARI_EVENT_TIMESTAMP: event.timestamp,
+  }
+});
+```
+
+YAML 側で `{{ event.line }}` を見たら **`"$MIHARI_EVENT_LINE"`** に変換してスクリプトに渡す。これでログ行に `;rm -rf` が混ざっても安全。
+
+cron / manual トリガーでは `MIHARI_EVENT_LINE` `MIHARI_EVENT_PATH` は空文字。
 
 ## ライフサイクル
 
@@ -245,34 +307,23 @@ load runbooks
   └→ build CronScheduler list (one per cron runbook)
 load state
 loop:
-  for poller in file_pollers:             # 逐次
-    lines = poller.tick()
-    for line in lines:
-      matches = matcher.match(line, runbooks)
-      for m in matches:
-        await executor.execute(m)
-  for scheduler in cron_schedulers:       # 逐次
-    fired = scheduler.tick()
-    if fired:
-      await executor.execute({ runbook: scheduler.runbook, line: fired })
+  await dispatcher.tick({pollers, cronSchedulers, executor, runbooks})
   sleep(--interval)
-on SIGINT:
-  finish current step
-  flush state
-  exit 0
+on SIGINT/SIGTERM:
+  set stopping=true; finish current tick; exit 0
 ```
 
 ### `poll` モード
 
-`daemon` の loop body を1回だけ呼ぶ。終了コードは「実行したランブックの中に1つでも失敗があれば 1」。
+`tick()` を1回だけ呼ぶ。終了コードは「実行したランブックの中に1つでも失敗があれば 1」。
 
 ### `run <id>` モード
 
-トリガー無し。`event` 変数はダミー（または `--input` で渡された値）。state にも書かない（手動オペ／テスト想定）。
+トリガー無し。`{type: "manual", timestamp: now}` イベントで直接 Executor を呼ぶ。FilePoller / CronScheduler / Matcher を経由しない。
 
 ## 並列性まとめ
 
-- 複数Poller: **逐次**
+- 複数Poller / Scheduler: **逐次**
 - 同一行へのマッチ複数ランブック: **逐次**
 - ランブック内ステップ: **逐次**
 
@@ -291,7 +342,7 @@ on SIGINT:
 | ログファイル truncate | `offset=0` で再開 |
 | bash 非0終了 | `on_error` に従う |
 | bash timeout | 失敗扱い、`on_error` に従う |
-| プロセス強制終了 | `markProcessed` 前なら次回重複実行（許容） |
+| プロセス強制終了 | 永続化前なら次回重複実行（許容） |
 
 ## Non-Goals（再掲）
 

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
@@ -98,6 +105,81 @@ export class StateStore {
       log.warn({ file, err: (e as Error).message }, "run result write failed");
     }
   }
+
+  listRuns(opts: ListRunsOptions = {}): RunResult[] {
+    const limit = opts.limit ?? 20;
+    const since = opts.since ? opts.since.slice(0, 10) : null;
+    const dates = listRunDates(this.baseDir);
+    const out: RunResult[] = [];
+    for (const date of dates) {
+      if (since && date < since) break;
+      for (const r of readDateDir(join(this.baseDir, "runs", date))) {
+        if (opts.runbookId && r.runbook_id !== opts.runbookId) continue;
+        out.push(r);
+      }
+    }
+    out.sort((a, b) => b.started_at.localeCompare(a.started_at));
+    return out.slice(0, limit);
+  }
+
+  getRun(runId: string): RunResult | null {
+    const dates = listRunDates(this.baseDir);
+    for (const date of dates) {
+      const file = join(this.baseDir, "runs", date, `${runId}.jsonl`);
+      if (!existsSync(file)) continue;
+      const records = readJsonlFile(file);
+      // 同一 run_id に複数行があっても、最終行を最新とみなす（append 想定）
+      return records[records.length - 1] ?? null;
+    }
+    return null;
+  }
+}
+
+export interface ListRunsOptions {
+  limit?: number;
+  runbookId?: string;
+  // ISO date string YYYY-MM-DD or full ISO timestamp; only YYYY-MM-DD prefix is used.
+  since?: string;
+}
+
+function listRunDates(baseDir: string): string[] {
+  const runsDir = join(baseDir, "runs");
+  if (!existsSync(runsDir)) return [];
+  return readdirSync(runsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d.name))
+    .map((d) => d.name)
+    .sort()
+    .reverse();
+}
+
+function readDateDir(dir: string): RunResult[] {
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && d.name.endsWith(".jsonl"));
+  const out: RunResult[] = [];
+  for (const f of files) {
+    out.push(...readJsonlFile(join(dir, f.name)));
+  }
+  return out;
+}
+
+function readJsonlFile(file: string): RunResult[] {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    log.warn({ file, err: (e as Error).message }, "run record read failed");
+    return [];
+  }
+  const out: RunResult[] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      out.push(JSON.parse(line) as RunResult);
+    } catch {
+      log.warn({ file }, "skipping malformed run record line");
+    }
+  }
+  return out;
 }
 
 export function defaultStateDir(): string {

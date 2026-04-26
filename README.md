@@ -50,8 +50,17 @@ npx mihari poll
 
 | ドキュメント | 内容 |
 |------------|------|
+| [doc/architecture.md](./doc/architecture.md) | 実行アーキテクチャ |
 | [doc/cli.md](./doc/cli.md) | CLIコマンドリファレンス |
 | [doc/runbook-spec.md](./doc/runbook-spec.md) | ランブックYAML仕様 |
+
+## チェック
+
+リポジトリ構造の検証は [monban](https://github.com/Mulyu/monban) を使う。設定は `monban.yml`。
+
+```bash
+npx @mulyu/monban all
+```
 
 ## ステータス
 

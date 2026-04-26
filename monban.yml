@@ -1,0 +1,57 @@
+exclude:
+  - "**/node_modules/**"
+
+content:
+  forbidden:
+    - path: "**/*"
+      conflict: true
+      severity: error
+    - path: "**/*"
+      secret: true
+      severity: warn
+    - path: "**/*"
+      invisible: true
+      severity: warn
+    - path: "**/*.md"
+      injection: true
+      severity: warn
+
+doc:
+  link:
+    - path: "doc/**/*.md"
+    - path: "*.md"
+
+git:
+  commit:
+    message:
+      subject_max_length: 72
+      severity: warn
+  diff:
+    size:
+      max_total_lines: 1500
+      exclude:
+        - "**/*.lock"
+        - "**/package-lock.json"
+        - "**/yarn.lock"
+        - "**/pnpm-lock.yaml"
+        - "**/__snapshots__/**"
+      severity: warn
+    ignored:
+      scope: diff
+      severity: warn
+  branch_name:
+    pattern: "^(main|claude/[A-Za-z0-9-]+)$"
+    allowed: ["main"]
+    severity: warn
+
+agent:
+  instructions:
+    - path: "CLAUDE.md"
+      required_sections:
+        - "プロジェクト概要"
+        - "設計原則"
+        - "ディレクトリ構造"
+        - "主要ライブラリ"
+        - "コーディング規約"
+        - "やらないこと（Non-Goals）"
+      severity: warn

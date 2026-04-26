@@ -1,0 +1,16 @@
+{
+  "name": "mihari",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local log file polling + bash runbook engine",
+  "scripts": {
+    "check": "monban all",
+    "test": "echo \"no tests yet\""
+  },
+  "devDependencies": {
+    "@mulyu/monban": "^0.2.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

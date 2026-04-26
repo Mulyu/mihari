@@ -1,25 +1,15 @@
 # mihari
 
-ローカルのログファイル、または cron スケジュールに反応して **bashランブック** を実行するCLIツール。
+ローカルのログファイル、または cron スケジュールに反応して bash ランブックを実行する CLI。
 
 > mihari (見張り) — ログを見張って、決まった対応を自動で走らせる軽量エンジン。
 
-## なにをするもの
+## できること
 
-- ローカルのログファイルを定期ポーリング（tail相当）。新規行が正規表現にマッチしたらランブック起動
-- cron 式で時刻ベースの定期実行も可能（HTTP合成監視は `bash` + `curl` で書く）
-- ランブックは `bash` ステップのみ
-- ファイル位置（オフセット）/ cron 発火時刻を state に保存して、次回起動時の重複・取りこぼしを抑える
-
-## なにをしないもの
-
-- Webhookサーバ
-- Datadog / Slack 連携
-- AI（Claude）連携
-- 承認フロー
-- リモートストレージ連携
-
-これらは将来の拡張余地として置いておくが、MVPでは**含めない**。
+- ログファイルを定期ポーリング（tail 相当）。新規行が正規表現にマッチでランブック起動
+- cron 式で時刻ベースの定期実行（HTTP 監視は `bash` + `curl` で書く）
+- ランブックは `bash` ステップ
+- ファイル位置 / 発火時刻を `~/.mihari/state/` に保存
 
 ## クイックスタート
 
@@ -27,7 +17,7 @@
 npm install
 npm run build
 
-# ランブックを書く（runbooks/*.yaml）
+# ランブックを書く
 cat > runbooks/disk-full.yaml <<'YAML'
 id: disk-full-cleanup
 trigger:
@@ -42,26 +32,27 @@ YAML
 # 常駐モード
 npx mihari daemon
 
-# 1回だけポーリング（cron向け）
+# 1回だけポーリング（cron 向け）
 npx mihari poll
+
+# 履歴を見る
+npx mihari history
 ```
 
 ## ドキュメント
 
-| ドキュメント | 内容 |
+| | |
 |------------|------|
-| [doc/architecture.md](./doc/architecture.md) | 実行アーキテクチャ |
-| [doc/cli.md](./doc/cli.md) | CLIコマンドリファレンス |
-| [doc/runbook-spec.md](./doc/runbook-spec.md) | ランブックYAML仕様 |
+| [doc/cli.md](./doc/cli.md) | CLI コマンドリファレンス |
+| [doc/runbook-spec.md](./doc/runbook-spec.md) | ランブック YAML 仕様 |
+| [runbooks/examples/](./runbooks/examples/) | サンプルランブック |
+
+開発者向けの設計方針・内部仕様は [CLAUDE.md](./CLAUDE.md)。
 
 ## チェック
 
-リポジトリ構造の検証は [monban](https://github.com/Mulyu/monban) を使う。設定は `monban.yml`。
+リポジトリ構造の検証は [monban](https://github.com/Mulyu/monban)。
 
 ```bash
 npx @mulyu/monban all
 ```
-
-## ステータス
-
-MVP開発中。

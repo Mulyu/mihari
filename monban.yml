@@ -31,6 +31,9 @@ git:
       max_total_lines: 1500
       exclude:
         - "**/*.lock"
+        - "**/package-lock.json"
+        - "**/yarn.lock"
+        - "**/pnpm-lock.yaml"
         - "**/__snapshots__/**"
       severity: warn
     ignored:

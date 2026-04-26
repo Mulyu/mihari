@@ -12,6 +12,7 @@ import { match, uniqueTriggerPaths } from "./core/matcher.js";
 import { StateStore, defaultStateDir } from "./core/state.js";
 import { createExecutor } from "./core/executor.js";
 import { FilePoller } from "./pollers/file.js";
+import { CronScheduler, cronRunbooks } from "./pollers/cron.js";
 import type { Runbook } from "./types.js";
 
 const log = pino({ name: "mihari" });
@@ -104,7 +105,11 @@ program
       return;
     }
     for (const rb of ctx.runbooks) {
-      console.log(`${rb.id}\t${rb.trigger.path}\t${rb.description ?? ""}`);
+      const triggerSummary =
+        rb.trigger.source === "file"
+          ? `file:${rb.trigger.path}`
+          : `cron:${rb.trigger.schedule}`;
+      console.log(`${rb.id}\t${triggerSummary}\t${rb.description ?? ""}`);
     }
   });
 
@@ -140,6 +145,7 @@ interface Ctx {
   state: StateStore;
   executor: ReturnType<typeof createExecutor>;
   pollers: FilePoller[];
+  cronSchedulers: CronScheduler[];
 }
 
 async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
@@ -161,7 +167,8 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
   const state = new StateStore({ baseDir: opts.stateDir });
   const executor = createExecutor(state);
   const pollers = uniqueTriggerPaths(runbooks).map((p) => new FilePoller(p, state));
-  return { runbooks, state, executor, pollers };
+  const cronSchedulers = cronRunbooks(runbooks).map((rb) => new CronScheduler(rb, state));
+  return { runbooks, state, executor, pollers, cronSchedulers };
 }
 
 async function runOneTick(ctx: Ctx, opts: { dryRun?: boolean } = {}): Promise<boolean> {
@@ -179,6 +186,16 @@ async function runOneTick(ctx: Ctx, opts: { dryRun?: boolean } = {}): Promise<bo
         if (!result.ok) allOk = false;
       }
     }
+  }
+  for (const scheduler of ctx.cronSchedulers) {
+    const fired = await scheduler.tick();
+    if (!fired) continue;
+    if (opts.dryRun) {
+      console.log(`[dry-run] ${scheduler.runbook.id} <- cron@${fired.timestamp}`);
+      continue;
+    }
+    const result = await ctx.executor.execute({ runbook: scheduler.runbook, line: fired });
+    if (!result.ok) allOk = false;
   }
   return allOk;
 }

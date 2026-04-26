@@ -1,7 +1,9 @@
+export type Trigger = FileTrigger | CronTrigger;
+
 export interface Runbook {
   id: string;
   description?: string;
-  trigger: FileTrigger;
+  trigger: Trigger;
   steps: BashStep[];
   sourcePath: string;
 }
@@ -10,6 +12,11 @@ export interface FileTrigger {
   source: "file";
   path: string;
   pattern: RegExp;
+}
+
+export interface CronTrigger {
+  source: "cron";
+  schedule: string;
 }
 
 export interface BashStep {
@@ -37,6 +44,11 @@ export interface PollerState {
   size: number;
   offset: number;
   updated_at: string;
+}
+
+export interface TriggerState {
+  runbook_id: string;
+  last_fired_at: string;
 }
 
 export interface StepResult {

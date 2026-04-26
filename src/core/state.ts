@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import pino from "pino";
-import type { PollerState, RunResult } from "../types.js";
+import type { PollerState, RunResult, TriggerState } from "../types.js";
 
 const log = pino({ name: "mihari.state" });
 
@@ -18,6 +18,7 @@ export class StateStore {
   constructor(opts: StateStoreOptions = {}) {
     this.baseDir = opts.baseDir ?? defaultStateDir();
     mkdirSync(join(this.baseDir, "pollers"), { recursive: true });
+    mkdirSync(join(this.baseDir, "triggers"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -51,6 +52,38 @@ export class StateStore {
     } catch (e) {
       // fail-open: state破損で全ポーリングが止まるほうが運用上のリスクが大きい
       log.warn({ file, err: (e as Error).message }, "poller state write failed");
+    }
+  }
+
+  triggerStateFile(runbookId: string): string {
+    const hash = createHash("sha1").update(runbookId).digest("hex").slice(0, 16);
+    return join(this.baseDir, "triggers", `${hash}.json`);
+  }
+
+  loadTriggerState(runbookId: string): TriggerState | null {
+    const file = this.triggerStateFile(runbookId);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateTriggerState(obj)) {
+        log.warn({ file }, "trigger state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn({ file, err: err.message }, "trigger state read failed, treating as empty");
+      return null;
+    }
+  }
+
+  async saveTriggerState(state: TriggerState): Promise<void> {
+    const file = this.triggerStateFile(state.runbook_id);
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "trigger state write failed");
     }
   }
 
@@ -95,4 +128,10 @@ function validatePollerState(v: unknown): v is PollerState {
     typeof o["offset"] === "number" &&
     typeof o["updated_at"] === "string"
   );
+}
+
+function validateTriggerState(v: unknown): v is TriggerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return typeof o["runbook_id"] === "string" && typeof o["last_fired_at"] === "string";
 }

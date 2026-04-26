@@ -1,1 +1,58 @@
 # mihari
+
+ローカルのログファイルをポーリングし、マッチした行に対して **bashランブック** を実行するCLIツール。
+
+> mihari (見張り) — ログを見張って、決まった対応を自動で走らせる軽量エンジン。
+
+## なにをするもの
+
+- ローカルのログファイルを定期ポーリング（tail相当）
+- 新規行が正規表現にマッチしたら対応するランブック（YAML）を実行
+- ランブックは `bash` ステップのみ
+- ファイル位置（オフセット）をstateに保存して、次回起動時の重複・取りこぼしを抑える
+
+## なにをしないもの
+
+- Webhookサーバ
+- Datadog / Slack 連携
+- AI（Claude）連携
+- 承認フロー
+- リモートストレージ連携
+
+これらは将来の拡張余地として置いておくが、MVPでは**含めない**。
+
+## クイックスタート
+
+```bash
+npm install
+npm run build
+
+# ランブックを書く（runbooks/*.yaml）
+cat > runbooks/disk-full.yaml <<'YAML'
+id: disk-full-cleanup
+trigger:
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR.*disk full"
+steps:
+  - id: cleanup
+    bash: /usr/local/bin/cleanup-tmp.sh
+YAML
+
+# 常駐モード
+npx mihari daemon
+
+# 1回だけポーリング（cron向け）
+npx mihari poll
+```
+
+## ドキュメント
+
+| ドキュメント | 内容 |
+|------------|------|
+| [doc/cli.md](./doc/cli.md) | CLIコマンドリファレンス |
+| [doc/runbook-spec.md](./doc/runbook-spec.md) | ランブックYAML仕様 |
+
+## ステータス
+
+MVP開発中。

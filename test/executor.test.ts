@@ -25,6 +25,7 @@ const step = (over: Partial<BashStep> = {}): BashStep => ({
   timeout_sec: 5,
   on_error: "stop",
   env: {},
+  capture: false,
   ...over,
 });
 
@@ -88,5 +89,56 @@ describe("Executor", () => {
     const executor = createExecutor(new StateStore({ baseDir: dir }));
     const r = await executor.execute(rb([step()]), event);
     expect(r.run_id).toMatch(/^run_[0-9a-f]{8}$/);
+  });
+
+  it("passes captured stdout from one step to the next via {{ steps.<id>.output }}", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "producer", bash: "echo hello", capture: true }),
+        step({
+          id: "consumer",
+          bash: 'echo "got={{ steps.producer.output }}"',
+          capture: true,
+        }),
+      ]),
+      event,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.steps[0]?.captured).toBe("hello");
+    expect(r.steps[1]?.stdout.trim()).toBe("got=hello");
+    expect(r.steps[1]?.captured).toBe("got=hello");
+  });
+
+  it("does not propagate capture to later steps when capture is false", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "producer", bash: "echo silent", capture: false }),
+        step({
+          id: "consumer",
+          bash: 'echo "got=[{{ steps.producer.output }}]"',
+        }),
+      ]),
+      event,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.steps[1]?.stdout.trim()).toBe("got=[]");
+  });
+
+  it("preserves embedded newlines in captured output across steps", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "producer", bash: "printf 'a\\nb'", capture: true }),
+        step({
+          id: "consumer",
+          bash: 'echo "{{ steps.producer.output }}" | wc -l',
+        }),
+      ]),
+      event,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.steps[1]?.stdout.trim()).toBe("2");
   });
 });

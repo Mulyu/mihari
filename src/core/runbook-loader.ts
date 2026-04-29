@@ -130,7 +130,21 @@ function validateBashStep(raw: unknown, file: string, ctx: string): BashStep {
   if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
     throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
   const env = validateEnv(raw["env"], file, `${ctx}.env`);
-  return { id, bash, timeout_sec, on_error: onErrorRaw, env };
+  const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
+  return { id, bash, timeout_sec, on_error: onErrorRaw, env, capture };
+}
+
+function optionalBoolean(
+  obj: Record<string, unknown>,
+  key: string,
+  file: string,
+  ctx?: string,
+): boolean | undefined {
+  const v = obj[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "boolean")
+    throw new RunbookValidationError(file, `${ctx ?? key} must be a boolean`);
+  return v;
 }
 
 function validateEnv(raw: unknown, file: string, ctx: string): Record<string, string> {

@@ -56,6 +56,7 @@ trigger:
   on_error: stop           # stop | continue（デフォ stop）
   env:
     APP_ENV: prod
+  capture: false           # true なら stdout を後続ステップに渡す（デフォ false）
 ```
 
 | フィールド | 内容 |
@@ -64,6 +65,7 @@ trigger:
 | `timeout_sec` | タイムアウト秒数（超過時 SIGTERM → 1秒後 SIGKILL） |
 | `on_error` | `stop`: 失敗で打ち切り / `continue`: 次ステップへ |
 | `env` | 追加環境変数 |
+| `capture` | `true` で stdout を保存し、後続ステップから `{{ steps.<id>.output }}` で参照可能。失敗ステップの stdout は保存しない |
 
 stdout / stderr はログと履歴 JSONL に記録される。
 
@@ -77,6 +79,15 @@ stdout / stderr はログと履歴 JSONL に記録される。
 | `{{ event.path }}` | ログファイルパス | 空文字 |
 | `{{ event.timestamp }}` | 行を読んだ時刻 (ISO8601) | 発火時刻 (ISO8601) |
 | `{{ env.<NAME> }}` | 環境変数 | 環境変数 |
+| `{{ steps.<id>.output }}` | `capture: true` の前段ステップの stdout（trailing newline 除去） | 同左 |
+
+`{{ ... }}` は `${VAR}` に展開されるだけなので、空白や改行を含みうる値は **必ずダブルクオートで囲む**：
+
+```yaml
+bash: |
+  echo "matched: {{ event.line }}"     # 良い
+  echo matched: {{ event.line }}       # 危険：IFS で単語分割される
+```
 
 ## バリデーション
 

@@ -46,11 +46,11 @@ export class CronScheduler {
     this.schedule = new Cron(runbook.trigger.schedule);
   }
 
-  async tick(now: Date = new Date()): Promise<CronEvent | null> {
+  async tick(now: Date = new Date(), dryRun = false): Promise<CronEvent | null> {
     const prev = this.state.loadTriggerState(this.runbook.id);
     const decision = decideCronFire(this.schedule, prev, now);
 
-    if (decision.newLastFiredAt) {
+    if (!dryRun && decision.newLastFiredAt) {
       await this.state.saveTriggerState({
         runbook_id: this.runbook.id,
         last_fired_at: decision.newLastFiredAt,

@@ -149,4 +149,41 @@ describe("dispatcher tick", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]).toContain("c <- cron@t");
   });
+
+  it("dryRun passes dryRun=true to file poller tick", async () => {
+    const rb = fileRb("a", "/var/log/app.log", /ERROR/);
+    const event: TriggerEvent = {
+      type: "file",
+      path: "/var/log/app.log",
+      content: "ERROR: bad",
+      timestamp: "t",
+    };
+    const exec = fakeExecutor();
+    const poller = fakeFilePoller([event]);
+    await tick(
+      { runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec },
+      { dryRun: true },
+    );
+    expect(poller.tick).toHaveBeenCalledWith(true);
+  });
+
+  it("dryRun passes dryRun=true to cron scheduler tick", async () => {
+    const rb = cronRb("c", "* * * * *");
+    const event: TriggerEvent = { type: "cron", timestamp: "t" };
+    const exec = fakeExecutor();
+    const scheduler = fakeCronScheduler(rb, event);
+    await tick(
+      { runbooks: [rb], pollers: [], cronSchedulers: [scheduler], executor: exec },
+      { dryRun: true },
+    );
+    expect(scheduler.tick).toHaveBeenCalledWith(expect.any(Date), true);
+  });
+
+  it("normal tick passes dryRun=false to file poller tick", async () => {
+    const rb = fileRb("a", "/var/log/app.log", /ERROR/);
+    const exec = fakeExecutor();
+    const poller = fakeFilePoller([]);
+    await tick({ runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec });
+    expect(poller.tick).toHaveBeenCalledWith(false);
+  });
 });

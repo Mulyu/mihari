@@ -50,7 +50,7 @@ export class FilePoller {
     private readonly state: StateStore,
   ) {}
 
-  async tick(): Promise<FileEvent[]> {
+  async tick(dryRun = false): Promise<FileEvent[]> {
     const absPath = resolve(this.path);
     let stats;
     try {
@@ -71,14 +71,16 @@ export class FilePoller {
     }
 
     if (decision.reason === "noop" || decision.reason === "new") {
-      const next: PollerState = {
-        path: absPath,
-        inode: Number(stats.ino),
-        size: stats.size,
-        offset: decision.startOffset,
-        updated_at: new Date().toISOString(),
-      };
-      await this.state.savePollerState(next);
+      if (!dryRun) {
+        const next: PollerState = {
+          path: absPath,
+          inode: Number(stats.ino),
+          size: stats.size,
+          offset: decision.startOffset,
+          updated_at: new Date().toISOString(),
+        };
+        await this.state.savePollerState(next);
+      }
       return [];
     }
 
@@ -100,15 +102,17 @@ export class FilePoller {
       timestamp,
     }));
 
-    const newOffset = decision.startOffset + consumed;
-    const next: PollerState = {
-      path: absPath,
-      inode: Number(stats.ino),
-      size: stats.size,
-      offset: newOffset,
-      updated_at: timestamp,
-    };
-    await this.state.savePollerState(next);
+    if (!dryRun) {
+      const newOffset = decision.startOffset + consumed;
+      const next: PollerState = {
+        path: absPath,
+        inode: Number(stats.ino),
+        size: stats.size,
+        offset: newOffset,
+        updated_at: timestamp,
+      };
+      await this.state.savePollerState(next);
+    }
     return out;
   }
 }

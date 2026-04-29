@@ -48,9 +48,11 @@ program
     const ctx = await bootstrap(program.opts<GlobalOpts>());
     log.info({ interval_sec: intervalSec, runbooks: ctx.runbooks.length }, "daemon started");
     let stopping = false;
+    let sigint = false;
     const stop = (sig: NodeJS.Signals) => {
       log.info({ sig }, "shutdown requested");
       stopping = true;
+      if (sig === "SIGINT") sigint = true;
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
@@ -60,6 +62,7 @@ program
       await sleep(intervalSec * 1000);
     }
     log.info("daemon stopped");
+    process.exit(sigint ? 130 : 0);
   });
 
 program

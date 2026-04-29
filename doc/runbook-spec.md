@@ -104,3 +104,4 @@ mihari validate runbooks/                # ディレクトリ指定で全件
 - `ssh-failed-login.yaml` — SSH 認証失敗の検知（file）
 - `api-health.yaml` — HTTP ヘルスチェック（cron + curl）
 - `backup-freshness.yaml` — バックアップ鮮度チェック（cron）
+- `k8s-pod-restart-summary.yaml` — Pod restart 数の定期集計（cron + capture）

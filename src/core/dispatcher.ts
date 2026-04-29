@@ -29,7 +29,7 @@ export async function tick(
   let fired = 0;
 
   for (const poller of input.pollers) {
-    const events = await poller.tick();
+    const events = await poller.tick(opts.dryRun ?? false);
     for (const event of events) {
       const matches = match(event, input.runbooks);
       for (const m of matches) {
@@ -45,7 +45,7 @@ export async function tick(
   }
 
   for (const scheduler of input.cronSchedulers) {
-    const event = await scheduler.tick();
+    const event = await scheduler.tick(new Date(), opts.dryRun ?? false);
     if (!event) continue;
     fired++;
     if (opts.dryRun) {

@@ -54,6 +54,11 @@ function validateRunbook(raw: unknown, file: string): Runbook {
 
   const description = optionalString(raw, "description", file);
 
+  const enabled = optionalBoolean(raw, "enabled", file) ?? undefined;
+  const cooldown_sec = optionalNumber(raw, "cooldown_sec", file, "cooldown_sec") ?? undefined;
+  if (cooldown_sec !== undefined && cooldown_sec <= 0)
+    throw new RunbookValidationError(file, "cooldown_sec must be > 0");
+
   const trigger = validateTrigger(raw["trigger"], file);
   const steps = validateSteps(raw["steps"], file);
 
@@ -64,6 +69,8 @@ function validateRunbook(raw: unknown, file: string): Runbook {
     sourcePath: file,
   };
   if (description !== undefined) rb.description = description;
+  if (enabled !== undefined) rb.enabled = enabled;
+  if (cooldown_sec !== undefined) rb.cooldown_sec = cooldown_sec;
   return rb;
 }
 
@@ -131,7 +138,21 @@ function validateBashStep(raw: unknown, file: string, ctx: string): BashStep {
     throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
   const env = validateEnv(raw["env"], file, `${ctx}.env`);
   const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
-  return { id, bash, timeout_sec, on_error: onErrorRaw, env, capture };
+  const conditionRaw = optionalString(raw, "condition", file, `${ctx}.condition`);
+  if (
+    conditionRaw !== undefined &&
+    conditionRaw !== "always" &&
+    conditionRaw !== "on_success" &&
+    conditionRaw !== "on_failure"
+  )
+    throw new RunbookValidationError(
+      file,
+      `${ctx}.condition must be "always", "on_success", or "on_failure"`,
+    );
+  const condition = conditionRaw as BashStep["condition"];
+  const step: BashStep = { id, bash, timeout_sec, on_error: onErrorRaw, env, capture };
+  if (condition !== undefined) step.condition = condition;
+  return step;
 }
 
 function optionalBoolean(

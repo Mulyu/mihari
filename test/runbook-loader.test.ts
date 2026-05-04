@@ -56,6 +56,52 @@ describe("loadRunbookFile", () => {
     expect(rb.steps[0]?.capture).toBe(true);
   });
 
+  it("accepts enabled: false", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_YAML + "\nenabled: false");
+    const rb = loadRunbookFile(f);
+    expect(rb.enabled).toBe(false);
+  });
+
+  it("defaults enabled to undefined (truthy)", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_YAML);
+    const rb = loadRunbookFile(f);
+    expect(rb.enabled).toBeUndefined();
+  });
+
+  it("accepts cooldown_sec", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_YAML + "\ncooldown_sec: 120");
+    const rb = loadRunbookFile(f);
+    expect(rb.cooldown_sec).toBe(120);
+  });
+
+  it("rejects cooldown_sec <= 0", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_YAML + "\ncooldown_sec: 0");
+    expect(() => loadRunbookFile(f)).toThrow(/cooldown_sec must be > 0/);
+  });
+
+  it("accepts step condition: on_failure", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(
+      f,
+      VALID_YAML.replace("    bash: echo hi", "    bash: echo hi\n    condition: on_failure"),
+    );
+    const rb = loadRunbookFile(f);
+    expect(rb.steps[0]?.condition).toBe("on_failure");
+  });
+
+  it("rejects unknown step condition", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(
+      f,
+      VALID_YAML.replace("    bash: echo hi", "    bash: echo hi\n    condition: maybe"),
+    );
+    expect(() => loadRunbookFile(f)).toThrow(/condition must be/);
+  });
+
   it("rejects non-boolean capture", () => {
     const f = join(dir, "rb.yaml");
     writeFileSync(

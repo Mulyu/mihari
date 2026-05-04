@@ -64,6 +64,24 @@ mihari list
 
 トリガー表記は `file:<path>` または `cron:<schedule>`。
 
+## `mihari status`
+
+各ランブックの最終実行時刻・成否・次回発火予定を一覧表示する。
+
+```bash
+mihari status
+```
+
+出力例（タブ区切り）：
+
+```
+disk-full-cleanup   file:/var/log/myapp.log   2026-04-29T02:11Z   ok    -
+api-health          cron:*/5 * * * *          2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
+backup-freshness    cron:0 9 * * *            2026-04-28T09:00Z   ok    2026-04-29T09:00Z
+```
+
+`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` トリガーでは常に `-`。
+
 ## `mihari validate <path>`
 
 ランブック YAML の構文・スキーマを検証する。エラー時は終了コード 1。

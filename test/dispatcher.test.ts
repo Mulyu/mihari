@@ -3,23 +3,32 @@ import { tick } from "../src/core/dispatcher.js";
 import type { Executor } from "../src/core/executor.js";
 import type { CronScheduler } from "../src/pollers/cron.js";
 import type { FilePoller } from "../src/pollers/file.js";
+import type { StateStore } from "../src/core/state.js";
 import type { Runbook, RunResult, TriggerEvent } from "../src/types.js";
 
-function fileRb(id: string, path: string, pattern: RegExp): Runbook {
+function fakeState(runs: RunResult[] = []): StateStore {
+  return {
+    listRuns: vi.fn().mockReturnValue(runs),
+  } as unknown as StateStore;
+}
+
+function fileRb(id: string, path: string, pattern: RegExp, extra: Partial<Runbook> = {}): Runbook {
   return {
     id,
     trigger: { source: "file", path, pattern },
     steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
     sourcePath: `/tmp/${id}.yaml`,
+    ...extra,
   };
 }
 
-function cronRb(id: string, schedule: string): Runbook {
+function cronRb(id: string, schedule: string, extra: Partial<Runbook> = {}): Runbook {
   return {
     id,
     trigger: { source: "cron", schedule },
     steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
     sourcePath: `/tmp/${id}.yaml`,
+    ...extra,
   };
 }
 
@@ -34,8 +43,8 @@ function fakeExecutor(ok = true): Executor & {
       const r: RunResult = {
         run_id: "run_xxxxxxxx",
         runbook_id: runbook.id,
-        started_at: "0",
-        finished_at: "0",
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
         ok,
         steps: [],
         trigger_event: event,
@@ -74,6 +83,7 @@ describe("dispatcher tick", () => {
       pollers: [fakeFilePoller([event])],
       cronSchedulers: [],
       executor: exec,
+      state: fakeState(),
     });
     expect(r.ok).toBe(true);
     expect(r.fired).toBe(1);
@@ -96,6 +106,7 @@ describe("dispatcher tick", () => {
       pollers: [fakeFilePoller([event])],
       cronSchedulers: [],
       executor: exec,
+      state: fakeState(),
     });
     expect(r.fired).toBe(0);
     expect(exec.calls).toHaveLength(0);
@@ -110,6 +121,7 @@ describe("dispatcher tick", () => {
       pollers: [],
       cronSchedulers: [fakeCronScheduler(rb, event)],
       executor: exec,
+      state: fakeState(),
     });
     expect(r.ok).toBe(true);
     expect(r.fired).toBe(1);
@@ -126,6 +138,7 @@ describe("dispatcher tick", () => {
       pollers: [],
       cronSchedulers: [fakeCronScheduler(rb, event)],
       executor: exec,
+      state: fakeState(),
     });
     expect(r.ok).toBe(false);
   });
@@ -141,6 +154,7 @@ describe("dispatcher tick", () => {
         pollers: [],
         cronSchedulers: [fakeCronScheduler(rb, event)],
         executor: exec,
+        state: fakeState(),
       },
       { dryRun: true, onDryRun: (m) => seen.push(m) },
     );
@@ -161,7 +175,7 @@ describe("dispatcher tick", () => {
     const exec = fakeExecutor();
     const poller = fakeFilePoller([event]);
     await tick(
-      { runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec },
+      { runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec, state: fakeState() },
       { dryRun: true },
     );
     expect(poller.tick).toHaveBeenCalledWith(true);
@@ -173,7 +187,7 @@ describe("dispatcher tick", () => {
     const exec = fakeExecutor();
     const scheduler = fakeCronScheduler(rb, event);
     await tick(
-      { runbooks: [rb], pollers: [], cronSchedulers: [scheduler], executor: exec },
+      { runbooks: [rb], pollers: [], cronSchedulers: [scheduler], executor: exec, state: fakeState() },
       { dryRun: true },
     );
     expect(scheduler.tick).toHaveBeenCalledWith(expect.any(Date), true);
@@ -183,7 +197,110 @@ describe("dispatcher tick", () => {
     const rb = fileRb("a", "/var/log/app.log", /ERROR/);
     const exec = fakeExecutor();
     const poller = fakeFilePoller([]);
-    await tick({ runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec });
+    await tick({ runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec, state: fakeState() });
     expect(poller.tick).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("dispatcher: enabled", () => {
+  it("skips file runbook when enabled=false", async () => {
+    const rb = fileRb("a", "/var/log/app.log", /ERROR/, { enabled: false });
+    const event: TriggerEvent = {
+      type: "file",
+      path: "/var/log/app.log",
+      content: "ERROR: bad",
+      timestamp: "t",
+    };
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [fakeFilePoller([event])],
+      cronSchedulers: [],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("skips cron runbook when enabled=false", async () => {
+    const rb = cronRb("c", "* * * * *", { enabled: false });
+    const event: TriggerEvent = { type: "cron", timestamp: "t" };
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [fakeCronScheduler(rb, event)],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+});
+
+describe("dispatcher: cooldown_sec", () => {
+  it("skips execution when within cooldown window", async () => {
+    const rb = cronRb("c", "* * * * *", { cooldown_sec: 300 });
+    const event: TriggerEvent = { type: "cron", timestamp: "t" };
+    const exec = fakeExecutor();
+    // last run was 10 seconds ago — within 300s cooldown
+    const recentRun: RunResult = {
+      run_id: "run_x",
+      runbook_id: "c",
+      started_at: new Date(Date.now() - 10_000).toISOString(),
+      finished_at: new Date(Date.now() - 9_000).toISOString(),
+      ok: true,
+      steps: [],
+      trigger_event: event,
+    };
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [fakeCronScheduler(rb, event)],
+      executor: exec,
+      state: fakeState([recentRun]),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("fires when cooldown window has elapsed", async () => {
+    const rb = cronRb("c", "* * * * *", { cooldown_sec: 300 });
+    const event: TriggerEvent = { type: "cron", timestamp: "t" };
+    const exec = fakeExecutor();
+    // last run was 400 seconds ago — cooldown has elapsed
+    const oldRun: RunResult = {
+      run_id: "run_x",
+      runbook_id: "c",
+      started_at: new Date(Date.now() - 400_000).toISOString(),
+      finished_at: new Date(Date.now() - 399_000).toISOString(),
+      ok: true,
+      steps: [],
+      trigger_event: event,
+    };
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [fakeCronScheduler(rb, event)],
+      executor: exec,
+      state: fakeState([oldRun]),
+    });
+    expect(r.fired).toBe(1);
+    expect(exec.calls).toHaveLength(1);
+  });
+
+  it("fires when there is no previous run (first time)", async () => {
+    const rb = cronRb("c", "* * * * *", { cooldown_sec: 300 });
+    const event: TriggerEvent = { type: "cron", timestamp: "t" };
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [fakeCronScheduler(rb, event)],
+      executor: exec,
+      state: fakeState([]),  // no previous runs
+    });
+    expect(r.fired).toBe(1);
   });
 });

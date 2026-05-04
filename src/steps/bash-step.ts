@@ -102,6 +102,7 @@ export async function runBashStep(step: BashStep, ctx: BashStepContext): Promise
         timed_out: false,
         error: err.message,
         captured: null,
+        skipped: false,
       });
     });
 
@@ -119,6 +120,7 @@ export async function runBashStep(step: BashStep, ctx: BashStepContext): Promise
         timed_out: timedOut,
         error: timedOut ? `timeout after ${step.timeout_sec}s` : null,
         captured: step.capture && ok ? captureStdout(stdout) : null,
+        skipped: false,
       });
     });
   });

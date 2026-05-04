@@ -57,22 +57,33 @@ StateStore     → 各種 I/O
 
 Dispatcher.tick():
   for FilePoller:
-    events = poller.tick()              # FileEvent[]
+    events = poller.tick(dryRun)        # FileEvent[]
     for event:
       for m in matcher.match(event, runbooks):
+        if runbook.enabled === false: skip
+        if cooldown_sec && elapsed < cooldown_sec: skip
         executor.execute(m.runbook, m.event)
 
   for CronScheduler:
-    event = scheduler.tick()            # CronEvent | null
-    if event:
+    if runbook.enabled === false: skip
+    event = scheduler.tick(now, dryRun) # CronEvent | null
+    if event && cooldown elapsed:
       executor.execute(scheduler.runbook, event)
 
 Executor:
+  anyFailed = false; stopped = false
   for step in runbook.steps:
+    if !shouldRun(step.condition, anyFailed, stopped): record skipped; continue
     runBashStep(step, { event })
-    if !ok && step.on_error === "stop": break
+    if !ok && step.on_error === "stop": stopped = true
   state.appendRunResult(...)
 ```
+
+`shouldRun` ルール（`step.condition` フィールド）:
+- 省略: `!stopped`（既存挙動を維持）
+- `always`: 常に実行（stopped 後でも）
+- `on_failure`: `anyFailed || stopped` のとき実行
+- `on_success`: `!anyFailed && !stopped` のとき実行
 
 `TriggerEvent` は識別共用体（`type: "file" | "cron" | "manual"`）。`bash-step` は `event.type` で `MIHARI_EVENT_LINE` `MIHARI_EVENT_PATH` を埋めるか空文字にする。`event.timestamp` は常に存在。
 

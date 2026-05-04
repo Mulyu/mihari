@@ -2,6 +2,7 @@ import { match } from "./matcher.js";
 import type { Executor } from "./executor.js";
 import type { CronScheduler } from "../pollers/cron.js";
 import type { FilePoller } from "../pollers/file.js";
+import type { StateStore } from "./state.js";
 import type { Runbook } from "../types.js";
 
 export interface DispatcherInput {
@@ -9,6 +10,7 @@ export interface DispatcherInput {
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
   executor: Executor;
+  state: StateStore;
 }
 
 export interface TickOptions {
@@ -33,6 +35,8 @@ export async function tick(
     for (const event of events) {
       const matches = match(event, input.runbooks);
       for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
         fired++;
         if (opts.dryRun) {
           opts.onDryRun?.(`${m.runbook.id} <- ${event.path}: ${event.content}`);
@@ -45,8 +49,10 @@ export async function tick(
   }
 
   for (const scheduler of input.cronSchedulers) {
+    if (scheduler.runbook.enabled === false) continue;
     const event = await scheduler.tick(new Date(), opts.dryRun ?? false);
     if (!event) continue;
+    if (!isCooldownElapsed(scheduler.runbook, input.state)) continue;
     fired++;
     if (opts.dryRun) {
       opts.onDryRun?.(`${scheduler.runbook.id} <- cron@${event.timestamp}`);
@@ -57,4 +63,12 @@ export async function tick(
   }
 
   return { ok, fired };
+}
+
+function isCooldownElapsed(runbook: Runbook, state: StateStore): boolean {
+  if (!runbook.cooldown_sec) return true;
+  const [lastRun] = state.listRuns({ limit: 1, runbookId: runbook.id });
+  if (!lastRun) return true;
+  const elapsed = (Date.now() - new Date(lastRun.started_at).getTime()) / 1000;
+  return elapsed >= runbook.cooldown_sec;
 }

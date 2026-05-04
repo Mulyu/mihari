@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
+import { Cron } from "croner";
 import { logger, setLogLevel } from "./core/logger.js";
 import {
   loadRunbookFile,
@@ -159,6 +160,37 @@ program
       }
     },
   );
+
+program
+  .command("status")
+  .description("show last run and next scheduled fire for each runbook")
+  .action(async () => {
+    const ctx = await bootstrap(program.opts<GlobalOpts>());
+    if (ctx.runbooks.length === 0) {
+      console.log("(no runbooks)");
+      return;
+    }
+    for (const rb of ctx.runbooks) {
+      const triggerSummary =
+        rb.trigger.source === "file"
+          ? `file:${rb.trigger.path}`
+          : `cron:${rb.trigger.schedule}`;
+      const [lastRun] = ctx.state.listRuns({ limit: 1, runbookId: rb.id });
+      const lastAt = lastRun?.started_at ?? "(never)";
+      const status = lastRun ? (lastRun.ok ? "ok" : "FAIL") : "-";
+      let next = "-";
+      if (rb.trigger.source === "cron") {
+        const trigState = ctx.state.loadTriggerState(rb.id);
+        if (trigState) {
+          const cronObj = new Cron(rb.trigger.schedule);
+          const nextDate = cronObj.nextRun(new Date(trigState.last_fired_at));
+          if (nextDate) next = nextDate.toISOString();
+        }
+      }
+      const prefix = rb.enabled === false ? "[disabled] " : "";
+      console.log(`${prefix}${rb.id}\t${triggerSummary}\t${lastAt}\t${status}\t${next}`);
+    }
+  });
 
 program
   .command("validate <path>")

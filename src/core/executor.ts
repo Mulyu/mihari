@@ -33,13 +33,47 @@ async function runRunbook(
     "runbook started",
   );
 
-  let allOk = true;
+  let anyFailed = false;
+  let stopped = false;
   for (const step of runbook.steps) {
+    const condition = step.condition;
+    const failed = anyFailed || stopped;
+    // condition: undefined (default) → run unless a stop happened (preserves current behavior)
+    // condition: "always"            → always run
+    // condition: "on_failure"        → run only if any previous step failed
+    // condition: "on_success"        → run only if no failure so far
+    const shouldRun =
+      condition === "always" ||
+      (condition === "on_failure" && failed) ||
+      (condition === "on_success" && !failed) ||
+      (condition === undefined && !stopped);
+
+    if (!shouldRun) {
+      log.debug(
+        { run_id, runbook_id: runbook.id, step: step.id, condition, anyFailed, stopped },
+        "step skipped",
+      );
+      results.push({
+        stepId: step.id,
+        ok: true,
+        exit_code: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        duration_ms: 0,
+        timed_out: false,
+        error: null,
+        captured: null,
+        skipped: true,
+      });
+      continue;
+    }
+
     const r = await runBashStep(step, { event, capturedSteps });
     results.push(r);
     if (r.captured !== null) capturedSteps[step.id] = r.captured;
     if (!r.ok) {
-      allOk = false;
+      anyFailed = true;
       log.warn(
         {
           run_id,
@@ -50,7 +84,7 @@ async function runRunbook(
         },
         "step failed",
       );
-      if (step.on_error === "stop") break;
+      if (step.on_error === "stop") stopped = true;
     } else {
       log.info(
         { run_id, runbook_id: runbook.id, step: step.id, duration_ms: r.duration_ms },
@@ -65,11 +99,11 @@ async function runRunbook(
     runbook_id: runbook.id,
     started_at,
     finished_at,
-    ok: allOk,
+    ok: !anyFailed,
     steps: results,
     trigger_event: event,
   };
   await state.appendRunResult(result);
-  log.info({ run_id, runbook_id: runbook.id, ok: allOk }, "runbook finished");
+  log.info({ run_id, runbook_id: runbook.id, ok: !anyFailed }, "runbook finished");
   return result;
 }

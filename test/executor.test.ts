@@ -6,6 +6,7 @@ import { createExecutor } from "../src/core/executor.js";
 import { StateStore } from "../src/core/state.js";
 import type { BashStep, Runbook, TriggerEvent } from "../src/types.js";
 
+
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mihari-exec-"));
@@ -49,7 +50,7 @@ describe("Executor", () => {
     expect(r.steps).toHaveLength(2);
   });
 
-  it("stops on first failure when on_error=stop", async () => {
+  it("stops on first failure when on_error=stop, records skipped for subsequent steps", async () => {
     const executor = createExecutor(new StateStore({ baseDir: dir }));
     const r = await executor.execute(
       rb([
@@ -59,8 +60,11 @@ describe("Executor", () => {
       event,
     );
     expect(r.ok).toBe(false);
-    expect(r.steps).toHaveLength(1);
+    expect(r.steps).toHaveLength(2);
     expect(r.steps[0]?.stepId).toBe("a");
+    expect(r.steps[0]?.skipped).toBe(false);
+    expect(r.steps[1]?.stepId).toBe("b");
+    expect(r.steps[1]?.skipped).toBe(true);
   });
 
   it("continues past failures when on_error=continue", async () => {
@@ -140,5 +144,75 @@ describe("Executor", () => {
     );
     expect(r.ok).toBe(true);
     expect(r.steps[1]?.stdout.trim()).toBe("2");
+  });
+});
+
+describe("Executor: condition", () => {
+  it("condition: on_failure runs only when a previous step failed", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "main", bash: "exit 1", on_error: "continue" }),
+        step({ id: "notify", bash: "echo notified", condition: "on_failure" }),
+      ]),
+      event,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.steps[1]?.skipped).toBe(false);
+    expect(r.steps[1]?.stdout.trim()).toBe("notified");
+  });
+
+  it("condition: on_failure is skipped when all previous steps succeed", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "main", bash: "true" }),
+        step({ id: "notify", bash: "echo notified", condition: "on_failure" }),
+      ]),
+      event,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.steps[1]?.skipped).toBe(true);
+  });
+
+  it("condition: on_failure runs after on_error:stop failure", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "main", bash: "exit 1", on_error: "stop" }),
+        step({ id: "notify", bash: "echo notified", condition: "on_failure" }),
+      ]),
+      event,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.steps[1]?.skipped).toBe(false);
+    expect(r.steps[1]?.stdout.trim()).toBe("notified");
+  });
+
+  it("condition: always runs even after on_error:stop failure", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "a", bash: "exit 1", on_error: "stop" }),
+        step({ id: "b", bash: "true", condition: "always" }),
+        step({ id: "c", bash: "true" }),
+      ]),
+      event,
+    );
+    expect(r.steps[1]?.skipped).toBe(false);
+    expect(r.steps[1]?.ok).toBe(true);
+    expect(r.steps[2]?.skipped).toBe(true);
+  });
+
+  it("condition: on_success skips when any previous step failed", async () => {
+    const executor = createExecutor(new StateStore({ baseDir: dir }));
+    const r = await executor.execute(
+      rb([
+        step({ id: "a", bash: "exit 1", on_error: "continue" }),
+        step({ id: "b", bash: "true", condition: "on_success" }),
+      ]),
+      event,
+    );
+    expect(r.steps[1]?.skipped).toBe(true);
   });
 });

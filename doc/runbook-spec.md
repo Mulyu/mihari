@@ -7,6 +7,8 @@
 ```yaml
 id: kebab-case-id          # 必須。`[a-z0-9][a-z0-9-]*`
 description: ...           # 任意
+enabled: true              # 任意。false にすると daemon/poll で発火しない（デフォルト true）
+cooldown_sec: 300          # 任意。前回発火から指定秒以内は再発火しない
 trigger: ...               # 必須。file または cron
 steps: [ ... ]             # 必須。1件以上
 ```
@@ -57,6 +59,7 @@ trigger:
   env:
     APP_ENV: prod
   capture: false           # true なら stdout を後続ステップに渡す（デフォ false）
+  condition: on_success    # always | on_success | on_failure（デフォなし）
 ```
 
 | フィールド | 内容 |
@@ -66,6 +69,21 @@ trigger:
 | `on_error` | `stop`: 失敗で打ち切り / `continue`: 次ステップへ |
 | `env` | 追加環境変数 |
 | `capture` | `true` で stdout を保存し、後続ステップから `{{ steps.<id>.output }}` で参照可能。失敗ステップの stdout は保存しない |
+| `condition` | 実行条件。`on_failure`: 前ステップが1つでも失敗したら実行 / `always`: 常に実行 / `on_success`: 前ステップが全て成功時のみ実行。省略時は `on_error: stop` による打ち切りのみ従う（既存の挙動） |
+
+`condition: on_failure` は `on_error: stop` による打ち切り後でも実行される。失敗通知ステップに使う：
+
+```yaml
+steps:
+  - id: main
+    bash: /usr/local/bin/cleanup.sh
+    on_error: stop
+
+  - id: notify
+    condition: on_failure
+    bash: printf '%s\tfailed\n' "{{ event.timestamp }}" >> /var/log/mihari/alerts.log
+    on_error: continue
+```
 
 stdout / stderr はログと履歴 JSONL に記録される。
 

@@ -6,6 +6,8 @@ export interface Runbook {
   trigger: Trigger;
   steps: BashStep[];
   sourcePath: string;
+  enabled?: boolean;
+  cooldown_sec?: number;
 }
 
 export interface FileTrigger {
@@ -26,6 +28,7 @@ export interface BashStep {
   on_error: "stop" | "continue";
   env: Record<string, string>;
   capture: boolean;
+  condition?: "always" | "on_success" | "on_failure";
 }
 
 // 識別共用体。トリガー種別ごとに利用可能なフィールドを型で表現する。
@@ -65,6 +68,7 @@ export interface StepResult {
   // capture: true のステップで、テンプレ展開で使われる正規化済み stdout（trailing newline 除去）。
   // それ以外のステップでは null。
   captured: string | null;
+  skipped: boolean;
 }
 
 export interface RunResult {

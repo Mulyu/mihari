@@ -6,7 +6,7 @@ import {
   loadRunbookFile,
   loadRunbooks,
   RunbookValidationError,
-} from "../src/core/runbook-loader.js";
+} from "../src/loader/index.js";
 
 let dir: string;
 

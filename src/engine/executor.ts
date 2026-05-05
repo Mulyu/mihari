@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { logger } from "./logger.js";
+import { logger } from "../lib/logger.js";
 import { runBashStep } from "../steps/bash-step.js";
 import { runClaudeStep } from "../steps/claude-step.js";
 import { runClaudeAgentStep } from "../steps/claude-agent-step.js";
-import { computeIdempotencyKey } from "./idempotency.js";
+import { computeIdempotencyKey } from "../lib/idempotency.js";
 import type { Runbook, RunResult, Step, StepResult, TriggerEvent } from "../types.js";
-import type { StateStore } from "./state.js";
+import type { StateStore } from "../state/store.js";
 
 const log = logger("executor");
 

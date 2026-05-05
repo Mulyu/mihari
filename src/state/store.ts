@@ -10,7 +10,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
-import { logger } from "./logger.js";
+import { logger } from "../lib/logger.js";
 import type { PollerState, RunResult, TriggerState } from "../types.js";
 
 const log = logger("state");

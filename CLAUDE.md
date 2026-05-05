@@ -16,7 +16,7 @@
 1. **ポーリングのみ。Webhook は作らない。** inotify も使わない。シンプルさと移植性を優先。
 2. **重複実行は許容、冪等性はランブック側責務。** state でベストエフォートで防ぐが「絶対1回」は捨てる。
 3. **state 書き込み失敗は fail-open。** ログだけ残して処理続行。state 破損で全ポーリングが止まるほうが運用上のリスクが大きい。
-4. **ステップは bash と claude。** 承認フロー / HTTP 等は将来拡張として置いておくが、コードもドキュメントも書かない。
+4. **新ステップ種別は追加しない（当面）。** 既存の `bash` / `claude` / `claude_agent` 以外は増やさない。新しい振る舞いはまず「`bash` で書けるか」で篩う。書ける場合は `runbooks/examples/` にサンプルを足す形で表現する。
 5. **ローカル前提。** リモート同期しない、複数マシン対応しない。
 
 ## ディレクトリ構造
@@ -31,21 +31,35 @@ mihari/
 ├── tsconfig.json
 ├── src/
 │   ├── cli.ts                  # commander エントリ。bootstrap → dispatcher
-│   ├── core/
-│   │   ├── logger.ts           # 共有 pino root + setLogLevel
-│   │   ├── runbook-loader.ts   # YAML → Runbook[]、起動時 fail-closed
-│   │   ├── matcher.ts          # 純粋関数。file event → Match[]
-│   │   ├── dispatcher.ts       # tick(): poller/scheduler を回して executor へ
+│   ├── types.ts                # Runbook / Trigger / TriggerEvent / StepContext / RunResult
+│   ├── engine/                 # オーケストレーション層
+│   │   ├── dispatcher.ts       # tick(): trigger を回して executor へ
 │   │   ├── executor.ts         # execute(runbook, event) ステップループ
-│   │   └── state.ts            # ~/.mihari/state I/O
-│   ├── steps/
-│   │   ├── bash-step.ts        # spawn bash + テンプレ展開（注入安全）
-│   │   ├── claude-step.ts      # 単発の messages.create。副作用なし。テンプレ展開ヘルパもここから export
+│   │   └── matcher.ts          # 純粋関数。file event → Match[]
+│   ├── loader/                 # YAML → Runbook[] のバリデーション群
+│   │   ├── index.ts            # 公開エントリ（loadRunbooks / loadRunbookFile）
+│   │   ├── error.ts            # RunbookValidationError
+│   │   ├── primitives.ts       # mustString / optional* 等の小物
+│   │   ├── prompt-file.ts      # readPromptOrFile（claude / claude_agent 共有）
+│   │   ├── trigger.ts          # file / cron トリガー
+│   │   ├── step-common.ts      # 全ステップ共通フィールド（id/timeout_sec/...）
+│   │   ├── step-bash.ts        # bash ステップ
+│   │   ├── step-claude.ts      # claude ステップ
+│   │   ├── step-claude-agent.ts # claude_agent ステップ
+│   │   └── runbook.ts          # 全体 + steps[] dispatch
+│   ├── state/
+│   │   └── store.ts            # ~/.mihari/state I/O
+│   ├── triggers/               # YAML の trigger.source に対応する取得元
+│   │   ├── file.ts             # FilePoller（offset/inode/size 判定）
+│   │   └── cron.ts             # CronScheduler（croner で発火判定）
+│   ├── steps/                  # 各ステップの実行
+│   │   ├── template.ts         # 共有テンプレ展開（bash / claude 両方）
+│   │   ├── bash-step.ts        # spawn bash（注入安全）
+│   │   ├── claude-step.ts      # 単発の messages.create。副作用なし
 │   │   └── claude-agent-step.ts # @anthropic-ai/claude-agent-sdk による agent ループ。副作用あり
-│   ├── pollers/
-│   │   ├── file.ts             # tail（offset/inode/size 判定）
-│   │   └── cron.ts             # croner で発火判定
-│   └── types.ts                # Runbook / Trigger / TriggerEvent / RunResult
+│   └── lib/                    # 横断ヘルパ
+│       ├── logger.ts           # 共有 pino root + setLogLevel
+│       └── idempotency.ts      # event → 決定的 12 hex キー
 ├── test/                       # vitest
 └── runbooks/
     └── examples/
@@ -162,7 +176,7 @@ Executor:
 
 - Webhook サーバ
 - Datadog / Slack 連携
-- 承認フロー
+- 承認フロー / HTTP / SQL 等の新ステップ種別
 - リモートステート同期（S3 等）
 - GUI
 - マルチテナント

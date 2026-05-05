@@ -83,6 +83,14 @@ export type TriggerEvent =
   | { type: "cron"; timestamp: string }
   | { type: "manual"; timestamp: string };
 
+// 全ステップ実行時に渡される共通コンテキスト。
+// bash / claude / claude_agent いずれの runner も同じ型を受け取る。
+export interface StepContext {
+  event: TriggerEvent;
+  capturedSteps: Record<string, string>;
+  idempotencyKey: string;
+}
+
 export interface Match {
   runbook: Runbook;
   event: TriggerEvent;

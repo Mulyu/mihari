@@ -1,9 +1,9 @@
 import { Cron } from "croner";
-import { logger } from "../core/logger.js";
+import { logger } from "../lib/logger.js";
 import type { CronTrigger, Runbook, TriggerEvent, TriggerState } from "../types.js";
-import type { StateStore } from "../core/state.js";
+import type { StateStore } from "../state/store.js";
 
-const log = logger("poller.cron");
+const log = logger("trigger.cron");
 
 export type CronEvent = Extract<TriggerEvent, { type: "cron" }>;
 

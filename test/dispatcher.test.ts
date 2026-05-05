@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { tick } from "../src/core/dispatcher.js";
-import type { Executor } from "../src/core/executor.js";
-import type { CronScheduler } from "../src/pollers/cron.js";
-import type { FilePoller } from "../src/pollers/file.js";
-import type { StateStore } from "../src/core/state.js";
+import { tick } from "../src/engine/dispatcher.js";
+import type { Executor } from "../src/engine/executor.js";
+import type { CronScheduler } from "../src/triggers/cron.js";
+import type { FilePoller } from "../src/triggers/file.js";
+import type { StateStore } from "../src/state/store.js";
 import type { Runbook, RunResult, TriggerEvent } from "../src/types.js";
 
 function fakeState(runs: RunResult[] = []): StateStore {

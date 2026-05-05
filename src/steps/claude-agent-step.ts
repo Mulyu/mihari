@@ -1,10 +1,6 @@
 import { logger } from "../core/logger.js";
-import type { ClaudeAgentStep, StepResult } from "../types.js";
-import {
-  captureClaudeOutput,
-  substituteClaudeTemplate,
-  type StepContext,
-} from "./claude-step.js";
+import type { ClaudeAgentStep, StepContext, StepResult } from "../types.js";
+import { captureStdout, substituteClaudeTemplate } from "./template.js";
 
 const log = logger("step.claude-agent");
 
@@ -187,7 +183,7 @@ export async function runClaudeAgentStep(
     duration_ms: Date.now() - start,
     timed_out: timedOut,
     error: errorMessage,
-    captured: step.capture && ok ? captureClaudeOutput(stdout) : null,
+    captured: step.capture && ok ? captureStdout(stdout) : null,
     skipped: false,
   };
 }

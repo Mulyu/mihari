@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Cron } from "croner";
 import YAML from "yaml";
@@ -137,63 +137,71 @@ function validateSteps(raw: unknown, file: string, runbookFile: string): Step[] 
   return steps;
 }
 
+// 全ステップ種別で共通する id / timeout_sec / on_error / capture / condition のパース。
+// 各 validate*Step 関数はこれを呼び、その他のフィールド（bash, claude, claude_agent）は
+// 個別に組み立てる。
+interface CommonStepFields {
+  id: string;
+  timeout_sec: number;
+  on_error: "stop" | "continue";
+  capture: boolean;
+  condition?: "always" | "on_success" | "on_failure";
+}
+
+function validateCommonStepFields(
+  raw: Record<string, unknown>,
+  file: string,
+  ctx: string,
+): CommonStepFields {
+  const id = mustString(raw, "id", file, `${ctx}.id`);
+  const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
+  if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
+  const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
+  if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
+    throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
+  const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
+  const conditionRaw = optionalString(raw, "condition", file, `${ctx}.condition`);
+  if (
+    conditionRaw !== undefined &&
+    conditionRaw !== "always" &&
+    conditionRaw !== "on_success" &&
+    conditionRaw !== "on_failure"
+  )
+    throw new RunbookValidationError(
+      file,
+      `${ctx}.condition must be "always", "on_success", or "on_failure"`,
+    );
+  const condition = conditionRaw as CommonStepFields["condition"];
+  const out: CommonStepFields = { id, timeout_sec, on_error: onErrorRaw, capture };
+  if (condition !== undefined) out.condition = condition;
+  return out;
+}
+
 function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile: string): ClaudeStep {
   if (!isObject(raw)) throw new RunbookValidationError(file, `${ctx} must be a mapping`);
-  const id = mustString(raw, "id", file, `${ctx}.id`);
 
   const claudeRaw = raw["claude"];
   if (!isObject(claudeRaw))
     throw new RunbookValidationError(file, `${ctx}.claude must be a mapping`);
 
-  const hasPrompt = "prompt" in claudeRaw;
-  const hasPromptFile = "prompt_file" in claudeRaw;
-  if (!hasPrompt && !hasPromptFile)
+  const prompt = readPromptOrFile(
+    claudeRaw,
+    file,
+    `${ctx}.claude`,
+    runbookFile,
+    "prompt",
+    "prompt_file",
+  );
+  if (prompt === undefined)
     throw new RunbookValidationError(file, `${ctx}.claude must have "prompt" or "prompt_file"`);
-  if (hasPrompt && hasPromptFile)
-    throw new RunbookValidationError(
-      file,
-      `${ctx}.claude cannot have both "prompt" and "prompt_file"`,
-    );
-
-  let prompt: string;
-  if (hasPromptFile) {
-    const relPath = mustString(claudeRaw, "prompt_file", file, `${ctx}.claude.prompt_file`);
-    const absPath = resolve(dirname(runbookFile), relPath);
-    try {
-      prompt = readFileSync(absPath, "utf8");
-    } catch {
-      throw new RunbookValidationError(
-        file,
-        `${ctx}.claude.prompt_file: cannot read file: ${absPath}`,
-      );
-    }
-  } else {
-    prompt = mustString(claudeRaw, "prompt", file, `${ctx}.claude.prompt`);
-  }
-
-  const hasSystem = "system" in claudeRaw;
-  const hasSystemFile = "system_file" in claudeRaw;
-  if (hasSystem && hasSystemFile)
-    throw new RunbookValidationError(
-      file,
-      `${ctx}.claude cannot have both "system" and "system_file"`,
-    );
-
-  let system: string | undefined;
-  if (hasSystemFile) {
-    const relPath = mustString(claudeRaw, "system_file", file, `${ctx}.claude.system_file`);
-    const absPath = resolve(dirname(runbookFile), relPath);
-    try {
-      system = readFileSync(absPath, "utf8");
-    } catch {
-      throw new RunbookValidationError(
-        file,
-        `${ctx}.claude.system_file: cannot read file: ${absPath}`,
-      );
-    }
-  } else if (hasSystem) {
-    system = mustString(claudeRaw, "system", file, `${ctx}.claude.system`);
-  }
+  const system = readPromptOrFile(
+    claudeRaw,
+    file,
+    `${ctx}.claude`,
+    runbookFile,
+    "system",
+    "system_file",
+  );
 
   const model =
     optionalString(claudeRaw, "model", file, `${ctx}.claude.model`) ?? "claude-opus-4-7";
@@ -212,32 +220,21 @@ function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile
       );
   }
 
-  const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
-  if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
-  const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
-  if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
-    throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
-  const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
-  const conditionRaw = optionalString(raw, "condition", file, `${ctx}.condition`);
-  if (
-    conditionRaw !== undefined &&
-    conditionRaw !== "always" &&
-    conditionRaw !== "on_success" &&
-    conditionRaw !== "on_failure"
-  )
-    throw new RunbookValidationError(
-      file,
-      `${ctx}.condition must be "always", "on_success", or "on_failure"`,
-    );
-  const condition = conditionRaw as ClaudeStep["condition"];
+  const common = validateCommonStepFields(raw, file, ctx);
   const claude: ClaudeStep["claude"] = {
     prompt,
     model,
     max_tokens,
     ...(system !== undefined ? { system } : {}),
   };
-  const step: ClaudeStep = { id, claude, timeout_sec, on_error: onErrorRaw, capture };
-  if (condition !== undefined) step.condition = condition;
+  const step: ClaudeStep = {
+    id: common.id,
+    claude,
+    timeout_sec: common.timeout_sec,
+    on_error: common.on_error,
+    capture: common.capture,
+  };
+  if (common.condition !== undefined) step.condition = common.condition;
   return step;
 }
 
@@ -248,7 +245,6 @@ function validateClaudeAgentStep(
   runbookFile: string,
 ): ClaudeAgentStep {
   if (!isObject(raw)) throw new RunbookValidationError(file, `${ctx} must be a mapping`);
-  const id = mustString(raw, "id", file, `${ctx}.id`);
 
   const cfgRaw = raw["claude_agent"];
   if (!isObject(cfgRaw))
@@ -312,24 +308,7 @@ function validateClaudeAgentStep(
   const conventions =
     optionalBoolean(cfgRaw, "conventions", file, `${ctx}.claude_agent.conventions`) ?? false;
 
-  const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
-  if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
-  const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
-  if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
-    throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
-  const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
-  const conditionRaw = optionalString(raw, "condition", file, `${ctx}.condition`);
-  if (
-    conditionRaw !== undefined &&
-    conditionRaw !== "always" &&
-    conditionRaw !== "on_success" &&
-    conditionRaw !== "on_failure"
-  )
-    throw new RunbookValidationError(
-      file,
-      `${ctx}.condition must be "always", "on_success", or "on_failure"`,
-    );
-  const condition = conditionRaw as ClaudeAgentStep["condition"];
+  const common = validateCommonStepFields(raw, file, ctx);
 
   const claude_agent: ClaudeAgentStep["claude_agent"] = {
     prompt,
@@ -342,13 +321,13 @@ function validateClaudeAgentStep(
     ...(cwd !== undefined ? { cwd } : {}),
   };
   const step: ClaudeAgentStep = {
-    id,
+    id: common.id,
     claude_agent,
-    timeout_sec,
-    on_error: onErrorRaw,
-    capture,
+    timeout_sec: common.timeout_sec,
+    on_error: common.on_error,
+    capture: common.capture,
   };
-  if (condition !== undefined) step.condition = condition;
+  if (common.condition !== undefined) step.condition = common.condition;
   return step;
 }
 
@@ -399,34 +378,23 @@ function validateAllowedTools(raw: unknown, file: string, ctx: string): string[]
 
 function validateBashStep(raw: unknown, file: string, ctx: string): BashStep {
   if (!isObject(raw)) throw new RunbookValidationError(file, `${ctx} must be a mapping`);
-  const id = mustString(raw, "id", file, `${ctx}.id`);
   if (!("bash" in raw))
     throw new RunbookValidationError(
       file,
       `${ctx} must have a bash field (only bash steps are supported in MVP)`,
     );
   const bash = mustString(raw, "bash", file, `${ctx}.bash`);
-  const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
-  if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
-  const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
-  if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
-    throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
   const env = validateEnv(raw["env"], file, `${ctx}.env`);
-  const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
-  const conditionRaw = optionalString(raw, "condition", file, `${ctx}.condition`);
-  if (
-    conditionRaw !== undefined &&
-    conditionRaw !== "always" &&
-    conditionRaw !== "on_success" &&
-    conditionRaw !== "on_failure"
-  )
-    throw new RunbookValidationError(
-      file,
-      `${ctx}.condition must be "always", "on_success", or "on_failure"`,
-    );
-  const condition = conditionRaw as BashStep["condition"];
-  const step: BashStep = { id, bash, timeout_sec, on_error: onErrorRaw, env, capture };
-  if (condition !== undefined) step.condition = condition;
+  const common = validateCommonStepFields(raw, file, ctx);
+  const step: BashStep = {
+    id: common.id,
+    bash,
+    timeout_sec: common.timeout_sec,
+    on_error: common.on_error,
+    env,
+    capture: common.capture,
+  };
+  if (common.condition !== undefined) step.condition = common.condition;
   return step;
 }
 
@@ -502,11 +470,3 @@ function optionalNumber(
   return v;
 }
 
-export function dirHasFiles(path: string): boolean {
-  try {
-    const s = statSync(path);
-    return s.isDirectory();
-  } catch {
-    return false;
-  }
-}

@@ -1,37 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../core/logger.js";
-import type { ClaudeStep, StepResult, TriggerEvent } from "../types.js";
+import type { ClaudeStep, StepContext, StepResult } from "../types.js";
+import { captureStdout, substituteClaudeTemplate } from "./template.js";
 
 const log = logger("step.claude");
 
-export interface StepContext {
-  event: TriggerEvent;
-  capturedSteps: Record<string, string>;
-  idempotencyKey: string;
-}
-
-const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|env\.[A-Za-z_][A-Za-z0-9_]*|steps\.[a-z0-9][a-z0-9-]*\.output)\s*\}\}/g;
-
-// プロンプト用の直接置換テンプレ展開。bash-step の env 経由展開とは別。
-// claude / claude_agent ステップで共有する。
-export function substituteClaudeTemplate(text: string, ctx: StepContext): string {
-  return text.replace(TEMPLATE_RE, (_raw, key: string) => {
-    if (key === "event.line") return ctx.event.type === "file" ? ctx.event.content : "";
-    if (key === "event.path") return ctx.event.type === "file" ? ctx.event.path : "";
-    if (key === "event.timestamp") return ctx.event.timestamp;
-    if (key.startsWith("env.")) return process.env[key.slice(4)] ?? "";
-    if (key.startsWith("steps.") && key.endsWith(".output")) {
-      const stepId = key.slice("steps.".length, -".output".length);
-      return ctx.capturedSteps[stepId] ?? "";
-    }
-    return _raw;
-  });
-}
-
-export function captureClaudeOutput(text: string): string {
-  return text.replace(/\n+$/, "");
-}
+// 後方互換用 re-export（claude-agent-step が捨てる経路）。
+export { substituteClaudeTemplate, captureStdout as captureClaudeOutput };
+export type { StepContext };
 
 export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise<StepResult> {
   const start = Date.now();
@@ -78,7 +54,7 @@ export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise
       duration_ms: Date.now() - start,
       timed_out: false,
       error: ok ? null : `stop_reason: ${response.stop_reason}`,
-      captured: step.capture && ok ? captureClaudeOutput(stdout) : null,
+      captured: step.capture && ok ? captureStdout(stdout) : null,
       skipped: false,
     };
   } catch (err) {

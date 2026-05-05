@@ -1,4 +1,4 @@
-import type { ClaudeAgentStep } from "../../types.js";
+import type { ClaudeAgentStep } from "../types.js";
 import { RunbookValidationError } from "./error.js";
 import {
   isObject,

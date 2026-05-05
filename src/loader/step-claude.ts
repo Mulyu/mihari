@@ -1,4 +1,4 @@
-import type { ClaudeStep } from "../../types.js";
+import type { ClaudeStep } from "../types.js";
 import { RunbookValidationError } from "./error.js";
 import { isObject, optionalNumber, optionalString } from "./primitives.js";
 import { readPromptOrFile } from "./prompt-file.js";

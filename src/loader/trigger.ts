@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import type { Trigger } from "../../types.js";
+import type { Trigger } from "../types.js";
 import { RunbookValidationError } from "./error.js";
 import { isObject, mustString } from "./primitives.js";
 

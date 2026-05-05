@@ -1,8 +1,8 @@
 import { match } from "./matcher.js";
 import type { Executor } from "./executor.js";
-import type { CronScheduler } from "../pollers/cron.js";
-import type { FilePoller } from "../pollers/file.js";
-import type { StateStore } from "./state.js";
+import type { CronScheduler } from "../triggers/cron.js";
+import type { FilePoller } from "../triggers/file.js";
+import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types.js";
 
 export interface DispatcherInput {

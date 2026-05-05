@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { logger } from "../core/logger.js";
+import { logger } from "../lib/logger.js";
 import type { ClaudeStep, StepContext, StepResult } from "../types.js";
 import { captureStdout, substituteClaudeTemplate } from "./template.js";
 

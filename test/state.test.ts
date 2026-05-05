@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { StateStore } from "../src/core/state.js";
+import { StateStore } from "../src/state/store.js";
 import type { PollerState, RunResult } from "../src/types.js";
 
 let dir: string;

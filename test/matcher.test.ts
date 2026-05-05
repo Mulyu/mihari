@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { match, uniqueTriggerPaths } from "../src/core/matcher.js";
+import { match, uniqueTriggerPaths } from "../src/engine/matcher.js";
 import type { Runbook, TriggerEvent } from "../src/types.js";
 
 function fileRb(id: string, path: string, pattern: RegExp): Runbook {

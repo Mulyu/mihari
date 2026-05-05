@@ -1,4 +1,4 @@
-import type { BashStep } from "../../types.js";
+import type { BashStep } from "../types.js";
 import { RunbookValidationError } from "./error.js";
 import { isObject, mustString } from "./primitives.js";
 import { validateCommonStepFields, validateEnv } from "./step-common.js";

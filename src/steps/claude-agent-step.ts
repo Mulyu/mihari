@@ -1,4 +1,4 @@
-import { logger } from "../core/logger.js";
+import { logger } from "../lib/logger.js";
 import type { ClaudeAgentStep, StepContext, StepResult } from "../types.js";
 import { captureStdout, substituteClaudeTemplate } from "./template.js";
 

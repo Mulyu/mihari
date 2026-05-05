@@ -40,6 +40,17 @@ export interface ClaudeStep {
     system?: string;
     model: string;
     max_tokens: number;
+    // Agent モード（Claude Agent SDK 経由）。true でファイル編集 / Bash 等のツール利用が有効。
+    agent?: boolean;
+    // agent: true 時のみ有効。SDK の allowedTools にそのまま渡す（"Read", "Bash(git push:*)" など）。
+    allowed_tools?: string[];
+    // agent: true 時のみ有効。SDK の maxTurns に対応。
+    max_turns?: number;
+    // agent: true 時のみ有効。"accept-edits" は edit 自動承認 + allowed_tools 範囲のみ実行可。
+    // "bypass" は全ツールを許可（allowDangerouslySkipPermissions = true）。
+    permission_mode?: "accept-edits" | "bypass";
+    // agent: true 時のみ有効。絶対パス。省略時は process.cwd()。
+    cwd?: string;
   };
   timeout_sec: number;
   on_error: "stop" | "continue";

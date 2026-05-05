@@ -135,13 +135,60 @@ bash: |
 | `claude.system` | System prompt (optional; mutually exclusive with `system_file`) |
 | `claude.system_file` | Path to a system-prompt file (optional; mutually exclusive with `system`) |
 | `claude.model` | Model to use (default `claude-opus-4-7`) |
-| `claude.max_tokens` | Maximum output tokens (default 1024) |
+| `claude.max_tokens` | Maximum output tokens (default 1024). Single-shot mode only; ignored when `agent: true`. |
 | `timeout_sec` | Timeout in seconds (default 60) |
 | `on_error` | `stop` / `continue` (default `stop`) |
 | `capture` | When `true`, the API response is available to later steps as `{{ steps.<id>.output }}` |
 | `condition` | `always` / `on_success` / `on_failure` (same as bash steps) |
 
 Template variables (`{{ event.line }}` etc.) are expanded via direct string substitution at runtime. `ANTHROPIC_API_KEY` must be set in the environment. A `stop_reason: max_tokens` response is treated as a step failure.
+
+#### Agent mode
+
+Setting `claude.agent: true` switches the step to the Claude Agent SDK, giving the model file edit tools (`Read`, `Edit`, `Write`) and `Bash`. Use this for code changes, commits, and PR creation. The captured output is the agent's final assistant message.
+
+```yaml
+- id: fix-and-pr
+  claude:
+    prompt: |
+      An error occurred: {{ event.line }}
+      Investigate, fix it on a new branch, push, and open a PR.
+    agent: true
+    allowed_tools:
+      - Read
+      - Edit
+      - Write
+      - "Bash(git status)"
+      - "Bash(git diff:*)"
+      - "Bash(git switch:*)"
+      - "Bash(git add:*)"
+      - "Bash(git commit:*)"
+      - "Bash(git push:*)"
+      - "Bash(gh pr create:*)"
+    permission_mode: accept-edits
+    max_turns: 30
+    cwd: /home/user/myrepo
+  timeout_sec: 600
+```
+
+| Field | Purpose |
+|----------|------|
+| `claude.agent` | `true` enables agent mode (default `false`) |
+| `claude.allowed_tools` | Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. |
+| `claude.permission_mode` | `accept-edits` (default; only `allowed_tools` entries run) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
+| `claude.max_turns` | Maximum agentic turns before the SDK stops (no default — SDK default applies) |
+| `claude.cwd` | Absolute path the agent operates in. Defaults to the directory mihari was started in. |
+
+Stage control is purely a function of `allowed_tools`:
+
+| Range | Add to `allowed_tools` |
+|---|---|
+| Edit-only | `Read` `Edit` `Write` |
+| + local commit | + `Bash(git status)` `Bash(git diff:*)` `Bash(git switch:*)` `Bash(git add:*)` `Bash(git commit:*)` |
+| + push | + `Bash(git push:*)` |
+| + PR | + `Bash(gh pr create:*)` |
+
+`agent`-only fields (`allowed_tools`, `permission_mode`, `max_turns`, `cwd`) are rejected when `agent` is unset/false.
 
 ## Validation
 
@@ -160,3 +207,4 @@ See `runbooks/examples/`:
 - `backup-freshness.yaml` — Backup-freshness check (cron)
 - `k8s-pod-restart-summary.yaml` — Periodic Pod-restart aggregation (cron + capture)
 - `error-analysis.yaml` — Analyzes error logs with Claude and suggests remediation (file + claude step)
+- `error-fix-pr.yaml` — Lets Claude fix the bug, push a branch, and open a PR (file + claude agent step)

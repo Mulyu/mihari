@@ -30,10 +30,41 @@ function captureOutput(text: string): string {
   return text.replace(/\n+$/, "");
 }
 
+// allowed_tools エントリと実際の tool 呼び出しを照合する。
+// "Read" / "Edit" などはツール名一致。
+// "Bash(git status)" はコマンド完全一致、"Bash(git push:*)" は "git push" もしくは
+// "git push <args>" にマッチ（: の前までを prefix として比較）。
+export function matchesAllowedTools(
+  toolName: string,
+  input: Record<string, unknown>,
+  patterns: readonly string[],
+): boolean {
+  for (const p of patterns) {
+    if (p === toolName) return true;
+    const m = /^([A-Za-z][A-Za-z0-9]*)\((.+)\)$/.exec(p);
+    if (!m) continue;
+    if (m[1] !== toolName) continue;
+    if (toolName !== "Bash") continue;
+    const command = typeof input["command"] === "string" ? (input["command"] as string) : "";
+    const spec = m[2] as string;
+    if (spec.endsWith(":*")) {
+      const prefix = spec.slice(0, -2);
+      if (command === prefix || command.startsWith(prefix + " ")) return true;
+    } else if (spec === command) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise<StepResult> {
   const start = Date.now();
   const prompt = substituteTemplate(step.claude.prompt, ctx);
   const system = step.claude.system ? substituteTemplate(step.claude.system, ctx) : undefined;
+
+  if (step.claude.agent) {
+    return runAgentBranch(step, prompt, system, start);
+  }
 
   const client = new Anthropic();
   const controller = new AbortController();
@@ -99,4 +130,111 @@ export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise
       skipped: false,
     };
   }
+}
+
+async function runAgentBranch(
+  step: ClaudeStep,
+  prompt: string,
+  system: string | undefined,
+  start: number,
+): Promise<StepResult> {
+  // 動的 import: agent モードを使わない利用者には @anthropic-ai/claude-agent-sdk のロードを発生させない。
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+
+  const allowed = step.claude.allowed_tools ?? [];
+  const pm = step.claude.permission_mode ?? "accept-edits";
+  const cwd = step.claude.cwd ?? process.cwd();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), step.timeout_sec * 1000);
+
+  let stdout = "";
+  let ok = false;
+  let errorMessage: string | null = null;
+  let timedOut = false;
+
+  try {
+    const sdkPermissionMode = pm === "bypass" ? "bypassPermissions" : "acceptEdits";
+    const baseOptions: Record<string, unknown> = {
+      cwd,
+      model: step.claude.model,
+      abortController: controller,
+      permissionMode: sdkPermissionMode,
+      allowedTools: allowed,
+    };
+    if (step.claude.max_turns !== undefined) baseOptions["maxTurns"] = step.claude.max_turns;
+    if (system !== undefined) {
+      // claude_code preset の上に append する形で system 指示を追加する。
+      baseOptions["systemPrompt"] = { type: "preset", preset: "claude_code", append: system };
+    }
+    if (pm === "bypass") {
+      baseOptions["allowDangerouslySkipPermissions"] = true;
+    } else {
+      // accept-edits: allowed_tools に無い tool 呼び出しは fail-closed で deny する。
+      // headless 実行で permission prompt によりブロックされない保証。
+      baseOptions["canUseTool"] = async (
+        toolName: string,
+        input: Record<string, unknown>,
+      ) => {
+        if (matchesAllowedTools(toolName, input, allowed)) {
+          return { behavior: "allow" as const, updatedInput: input };
+        }
+        return {
+          behavior: "deny" as const,
+          message: `tool ${toolName} not in allowed_tools`,
+        };
+      };
+    }
+
+    // SDK の Options 型は exactOptionalPropertyTypes と相性が悪い optional 多数を持つので、
+    // 構築済みのプレーンオブジェクトを options として渡す（型のみ as でアサート）。
+    const q = query({
+      prompt,
+      options: baseOptions as import("@anthropic-ai/claude-agent-sdk").Options,
+    });
+
+    for await (const msg of q) {
+      if (msg.type === "result") {
+        if (msg.subtype === "success") {
+          stdout = msg.result;
+          ok = true;
+        } else {
+          ok = false;
+          errorMessage = `agent ${msg.subtype}: num_turns=${msg.num_turns}`;
+        }
+        log.debug(
+          {
+            stepId: step.id,
+            subtype: msg.subtype,
+            num_turns: msg.num_turns,
+            duration_ms: msg.duration_ms,
+          },
+          "claude agent step done",
+        );
+        break;
+      }
+    }
+  } catch (err) {
+    timedOut = (err as Error).name === "AbortError";
+    errorMessage = timedOut
+      ? `timeout after ${step.timeout_sec}s`
+      : (err as Error).message;
+    log.warn({ stepId: step.id, err: errorMessage }, "claude agent step error");
+    ok = false;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return {
+    stepId: step.id,
+    ok,
+    exit_code: ok ? 0 : 1,
+    signal: null,
+    stdout,
+    stderr: "",
+    duration_ms: Date.now() - start,
+    timed_out: timedOut,
+    error: errorMessage,
+    captured: step.capture && ok ? captureOutput(stdout) : null,
+    skipped: false,
+  };
 }

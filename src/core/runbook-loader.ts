@@ -190,6 +190,43 @@ function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile
   if (max_tokens <= 0)
     throw new RunbookValidationError(file, `${ctx}.claude.max_tokens must be > 0`);
 
+  const agent = optionalBoolean(claudeRaw, "agent", file, `${ctx}.claude.agent`) ?? false;
+  const allowed_tools = validateAllowedTools(
+    claudeRaw["allowed_tools"],
+    file,
+    `${ctx}.claude.allowed_tools`,
+  );
+  const max_turns = optionalNumber(claudeRaw, "max_turns", file, `${ctx}.claude.max_turns`);
+  if (max_turns !== undefined && max_turns <= 0)
+    throw new RunbookValidationError(file, `${ctx}.claude.max_turns must be > 0`);
+  const pmRaw = optionalString(claudeRaw, "permission_mode", file, `${ctx}.claude.permission_mode`);
+  if (pmRaw !== undefined && pmRaw !== "accept-edits" && pmRaw !== "bypass")
+    throw new RunbookValidationError(
+      file,
+      `${ctx}.claude.permission_mode must be "accept-edits" or "bypass"`,
+    );
+  const cwd = optionalString(claudeRaw, "cwd", file, `${ctx}.claude.cwd`);
+  if (cwd !== undefined && !cwd.startsWith("/"))
+    throw new RunbookValidationError(file, `${ctx}.claude.cwd must be an absolute path`);
+
+  // agent: false で agent 専用フィールドが指定されたら設定誤りとして fail-closed
+  if (!agent) {
+    if (allowed_tools !== undefined)
+      throw new RunbookValidationError(
+        file,
+        `${ctx}.claude.allowed_tools requires agent: true`,
+      );
+    if (max_turns !== undefined)
+      throw new RunbookValidationError(file, `${ctx}.claude.max_turns requires agent: true`);
+    if (pmRaw !== undefined)
+      throw new RunbookValidationError(
+        file,
+        `${ctx}.claude.permission_mode requires agent: true`,
+      );
+    if (cwd !== undefined)
+      throw new RunbookValidationError(file, `${ctx}.claude.cwd requires agent: true`);
+  }
+
   const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
   if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
   const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
@@ -208,10 +245,35 @@ function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile
       `${ctx}.condition must be "always", "on_success", or "on_failure"`,
     );
   const condition = conditionRaw as ClaudeStep["condition"];
-  const claude = { prompt, model, max_tokens, ...(system !== undefined ? { system } : {}) };
+  const claude: ClaudeStep["claude"] = {
+    prompt,
+    model,
+    max_tokens,
+    ...(system !== undefined ? { system } : {}),
+  };
+  if (agent) {
+    claude.agent = true;
+    if (allowed_tools !== undefined) claude.allowed_tools = allowed_tools;
+    if (max_turns !== undefined) claude.max_turns = max_turns;
+    if (pmRaw !== undefined) claude.permission_mode = pmRaw as "accept-edits" | "bypass";
+    if (cwd !== undefined) claude.cwd = cwd;
+  }
   const step: ClaudeStep = { id, claude, timeout_sec, on_error: onErrorRaw, capture };
   if (condition !== undefined) step.condition = condition;
   return step;
+}
+
+function validateAllowedTools(raw: unknown, file: string, ctx: string): string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw))
+    throw new RunbookValidationError(file, `${ctx} must be an array of strings`);
+  const out: string[] = [];
+  for (const [i, v] of raw.entries()) {
+    if (typeof v !== "string" || v.length === 0)
+      throw new RunbookValidationError(file, `${ctx}[${i}] must be a non-empty string`);
+    out.push(v);
+  }
+  return out;
 }
 
 function validateBashStep(raw: unknown, file: string, ctx: string): BashStep {

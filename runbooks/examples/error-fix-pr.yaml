@@ -17,6 +17,9 @@ steps:
   - id: fix-and-pr
     claude_agent:
       model: claude-opus-4-7
+      # Opt into the built-in idempotency preamble: claude/fix-$KEY branch
+      # naming + skip on existing branch / open PR / dirty tree.
+      conventions: true
       prompt: |
         An error was reported in the application log:
 

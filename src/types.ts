@@ -65,7 +65,10 @@ export interface ClaudeAgentStep {
     // 絶対パス。省略時は process.cwd()。
     cwd?: string;
     // 既定の運用規約（PR 重複検知 / 決定的 branch 命名 / dirty tree チェック）を
-    // system prompt に自動 append するか。既定 true。
+    // system prompt に自動 append するか。既定 false。
+    // true にすると preamble が git status:* / git ls-remote:* / gh pr list:* を agent に
+    // 要求するため、allowed_tools にこれらが含まれていない runbook では canUseTool に
+    // 弾かれる。opt-in を明示してもらう前提でデフォルトは off にしている。
     conventions: boolean;
   };
   timeout_sec: number;

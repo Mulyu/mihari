@@ -397,23 +397,23 @@ steps:
     expect(step.claude_agent.model).toBe("claude-opus-4-7");
   });
 
-  it("defaults conventions to true", () => {
+  it("defaults conventions to false", () => {
     const f = join(dir, "rb.yaml");
     writeFileSync(f, VALID_AGENT);
     const rb = loadRunbookFile(f);
     const step = rb.steps[0];
     if (!step || !("claude_agent" in step)) throw new Error("expected claude_agent step");
-    expect(step.claude_agent.conventions).toBe(true);
+    expect(step.claude_agent.conventions).toBe(false);
   });
 
-  it("accepts conventions: false", () => {
-    const yaml = VALID_AGENT + "\n      conventions: false";
+  it("accepts conventions: true", () => {
+    const yaml = VALID_AGENT + "\n      conventions: true";
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
     const rb = loadRunbookFile(f);
     const step = rb.steps[0];
     if (!step || !("claude_agent" in step)) throw new Error("expected claude_agent step");
-    expect(step.claude_agent.conventions).toBe(false);
+    expect(step.claude_agent.conventions).toBe(true);
   });
 
   it("rejects non-boolean conventions", () => {

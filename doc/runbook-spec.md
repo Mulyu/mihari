@@ -191,16 +191,15 @@ A separate step type that runs the Claude Agent SDK with file edit tools (`Read`
 | `claude_agent.permission_mode` | `strict` (default; every tool call goes through `canUseTool` and is denied unless it matches `allowed_tools`) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
 | `claude_agent.max_turns` | Maximum agentic turns before the SDK stops (no default — SDK default applies) |
 | `claude_agent.cwd` | Absolute path the agent operates in. Defaults to the directory mihari was started in. |
-| `claude_agent.conventions` | When `true` (default), mihari prepends an idempotency preamble to the system prompt instructing the agent to use `claude/fix-$MIHARI_IDEMPOTENCY_KEY` as the branch name and to skip when an existing branch / open PR / dirty tree is detected. Set `false` for raw control. |
+| `claude_agent.conventions` | When `true`, mihari prepends an idempotency preamble to the system prompt instructing the agent to use `claude/fix-$MIHARI_IDEMPOTENCY_KEY` as the branch name and to skip when an existing branch / open PR / dirty tree is detected. **Default `false`** — opt in explicitly when the runbook opens PRs and is willing to grant the necessary tools (see below). |
 
 #### Built-in idempotency conventions
 
-When `conventions: true` (the default), mihari does two things automatically so runbook authors don't have to reproduce dedup boilerplate in every prompt:
+`MIHARI_IDEMPOTENCY_KEY` — a 12-character sha1 hex computed deterministically from the runbook id and the trigger event (file path + line, cron slot, or manual timestamp) — is **always** exported as an env var to both bash steps and to the agent's Bash tool. The same trigger observed twice produces the same key.
 
-1. **`MIHARI_IDEMPOTENCY_KEY`** — a 12-character sha1 hex computed deterministically from the runbook id and the trigger event (file path + line, cron slot, or manual timestamp). The same trigger observed twice produces the same key. mihari exports it as an env var to both bash steps and to the agent's Bash tool.
-2. **Operations preamble** — a fixed paragraph appended ahead of the user-supplied `system` prompt. It instructs the agent that, *if* its task involves opening a PR in a git repo, it must (a) abort on dirty tree, (b) skip when a branch named `claude/fix-$MIHARI_IDEMPOTENCY_KEY` already exists, (c) skip when an open PR mentions the key in its title, and (d) otherwise create the branch and PR using that exact name. For non-PR tasks (write a status file, run a migration, etc.) the agent is told to ignore the preamble.
+Setting `conventions: true` additionally appends a fixed **operations preamble** ahead of the user-supplied `system` prompt. The preamble instructs the agent that, *if* its task involves opening a PR in a git repo, it must (a) abort on dirty tree, (b) skip when a branch named `claude/fix-$MIHARI_IDEMPOTENCY_KEY` already exists, (c) skip when an open PR mentions the key in its title, and (d) otherwise create the branch and PR using that exact name. For non-PR tasks (write a status file, run a migration, etc.) the agent is told to ignore the preamble.
 
-Set `conventions: false` to skip the preamble. `MIHARI_IDEMPOTENCY_KEY` is still exported so the runbook author can reference it explicitly; only the system-prompt boilerplate is suppressed.
+The preamble references `git status:*`, `git ls-remote:*`, and `gh pr list:*`. If you turn it on, your `allowed_tools` must grant those patterns or `canUseTool` will deny the mandated checks. The default is `false` precisely because the preamble would otherwise demand tools the runbook may not have allowlisted.
 
 Stage control is purely a function of `allowed_tools`:
 

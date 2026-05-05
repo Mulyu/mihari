@@ -310,7 +310,7 @@ function validateClaudeAgentStep(
     throw new RunbookValidationError(file, `${ctx}.claude_agent.cwd must be an absolute path`);
 
   const conventions =
-    optionalBoolean(cfgRaw, "conventions", file, `${ctx}.claude_agent.conventions`) ?? true;
+    optionalBoolean(cfgRaw, "conventions", file, `${ctx}.claude_agent.conventions`) ?? false;
 
   const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
   if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);

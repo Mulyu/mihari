@@ -153,16 +153,15 @@ Claude Agent SDK でエージェントループを回す独立ステップ種別
 | `claude_agent.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
 | `claude_agent.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
 | `claude_agent.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
-| `claude_agent.conventions` | `true`（デフォ）で、`claude/fix-$MIHARI_IDEMPOTENCY_KEY` を branch 名に使い、既存 branch / open PR / dirty tree を検知した場合はスキップする運用規約を system prompt に自動 append する。生のままで動かしたいときは `false` |
+| `claude_agent.conventions` | `true` のとき、`claude/fix-$MIHARI_IDEMPOTENCY_KEY` を branch 名に使い、既存 branch / open PR / dirty tree を検知した場合はスキップする運用規約を system prompt に自動 append する。**デフォルトは `false`** — PR を開くタスクで、かつ後述の必要ツールを `allowed_tools` で許可している runbook が明示的に opt-in する形 |
 
 #### 組み込み idempotency 規約
 
-`conventions: true`（デフォ）のとき、ランブック著者が prompt に毎回 dedup ボイラープレートを書かなくても済むよう、mihari が以下を自動でやる:
+`MIHARI_IDEMPOTENCY_KEY` は **常に** export される。runbook id とトリガーイベント（file の場合はパス + 行、cron の場合は発火スロット、manual の場合は timestamp）から決定的に sha1 で計算した 12 文字 hex。同じトリガーが再観測されたら同じ値になる。`bash` ステップの env としても、`claude_agent` の Bash ツールにも自動的に渡す。
 
-1. **`MIHARI_IDEMPOTENCY_KEY`** — runbook id とトリガーイベント（file の場合はパス + 行、cron の場合は発火スロット、manual の場合は timestamp）から決定的に sha1 で計算した 12 文字 hex。同じトリガーが再観測されたら同じ値になる。`bash` ステップの env としても、`claude_agent` の Bash ツールにも自動的に渡す
-2. **運用規約の preamble** — 利用者の `system` プロンプトの**前に**固定パラグラフを挟む。「PR を開く類のタスクなら `git status` が dirty なら中止 / `claude/fix-$MIHARI_IDEMPOTENCY_KEY` の branch がリモートにあれば中止 / そのキーがタイトルに含まれる open PR があれば中止 / すべて通ったら同名 branch を作って PR タイトルにキーを含める」と指示する。PR を開かないタスク（ファイル出力やマイグレーション等）は preamble を無視するよう書いてある
+`conventions: true` のときは **運用規約の preamble** を利用者の `system` プロンプトの**前に**固定パラグラフとして挟む。「PR を開く類のタスクなら `git status` が dirty なら中止 / `claude/fix-$MIHARI_IDEMPOTENCY_KEY` の branch がリモートにあれば中止 / そのキーがタイトルに含まれる open PR があれば中止 / すべて通ったら同名 branch を作って PR タイトルにキーを含める」と指示する。PR を開かないタスク（ファイル出力やマイグレーション等）は preamble を無視するよう書いてある。
 
-`conventions: false` で preamble を切れる。`MIHARI_IDEMPOTENCY_KEY` env の export は残るので、ランブック著者が明示的に参照したい場合はそのまま使える。
+preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を agent に要求する。`true` にする場合は `allowed_tools` でこれらを許可しないと `canUseTool` に弾かれる。デフォルトを `false` にしているのは、必要ツールを許可していない runbook で preamble が一律に要求を追加すると壊れるため。
 
 段階制御は `allowed_tools` の中身だけで決まる：
 

@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "mulyu-okite": {
+      "source": {
+        "source": "github",
+        "repo": "Mulyu/okite"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "okite@mulyu-okite": true
+  }
+}

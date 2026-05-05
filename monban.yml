@@ -1,20 +1,11 @@
-exclude:
-  - "**/node_modules/**"
-
-content:
-  forbidden:
-    - path: "**/*"
-      conflict: true
-      severity: error
-    - path: "**/*"
-      secret: true
-      severity: warn
-    - path: "**/*"
-      invisible: true
-      severity: warn
-    - path: "**/*.md"
-      injection: true
-      severity: warn
+# 共通の security baseline は Mulyu/okite から継承する。
+# baseline の中身: secret / conflict / invisible / injection 検出、GitHub Actions ハードニング、
+#                  npm サプライチェーン対策、MCP 設定検査、.gitignore 対象の誤コミット検出。
+extends:
+  - type: github
+    repo: Mulyu/okite
+    ref: main
+    path: monban.yml
 
 doc:
   link:
@@ -35,9 +26,6 @@ git:
         - "**/yarn.lock"
         - "**/pnpm-lock.yaml"
         - "**/__snapshots__/**"
-      severity: warn
-    ignored:
-      scope: diff
       severity: warn
   branch_name:
     pattern: "^(main|claude/[A-Za-z0-9-]+)$"

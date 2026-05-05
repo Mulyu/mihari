@@ -1,0 +1,33 @@
+id: error-analysis
+description: Use Claude to analyze error log lines and suggest remediation
+trigger:
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR"
+steps:
+  - id: get-context
+    bash: |
+      tail -20 /var/log/myapp.log
+    capture: true
+
+  - id: analyze
+    claude:
+      prompt: |
+        An error occurred in the application. Analyze the error and suggest remediation steps.
+
+        Error line:
+        {{ event.line }}
+
+        Recent log context:
+        {{ steps.get-context.output }}
+      system: You are a senior DevOps engineer. Respond concisely with root cause and remediation steps.
+      model: claude-opus-4-7
+      max_tokens: 1024
+    capture: true
+    timeout_sec: 60
+
+  - id: record
+    bash: |
+      printf '%s\t%s\n' "{{ event.timestamp }}" "{{ steps.analyze.output }}" \
+        >> /var/log/mihari/error-analysis.log
+    condition: always

@@ -109,6 +109,40 @@ bash: |
   echo matched: {{ event.line }}       # Dangerous: IFS word-splits the value
 ```
 
+### `claude`
+
+```yaml
+- id: analyze-error
+  claude:
+    prompt: |
+      Error: {{ event.line }}
+      Context: {{ steps.get-context.output }}
+    prompt_file: prompts/analyze.md    # mutually exclusive with prompt (path relative to runbook YAML)
+    system: You are a DevOps expert.   # optional
+    system_file: prompts/system.md     # mutually exclusive with system (optional)
+    model: claude-opus-4-7             # default claude-opus-4-7
+    max_tokens: 1024                   # default 1024
+  timeout_sec: 60
+  on_error: stop
+  capture: true
+  condition: on_failure
+```
+
+| Field | Purpose |
+|----------|------|
+| `claude.prompt` | Prompt text (`prompt_file` is mutually exclusive; one is required) |
+| `claude.prompt_file` | Path to a prompt file (relative to the runbook YAML directory; read at startup) |
+| `claude.system` | System prompt (optional; mutually exclusive with `system_file`) |
+| `claude.system_file` | Path to a system-prompt file (optional; mutually exclusive with `system`) |
+| `claude.model` | Model to use (default `claude-opus-4-7`) |
+| `claude.max_tokens` | Maximum output tokens (default 1024) |
+| `timeout_sec` | Timeout in seconds (default 60) |
+| `on_error` | `stop` / `continue` (default `stop`) |
+| `capture` | When `true`, the API response is available to later steps as `{{ steps.<id>.output }}` |
+| `condition` | `always` / `on_success` / `on_failure` (same as bash steps) |
+
+Template variables (`{{ event.line }}` etc.) are expanded via direct string substitution at runtime. `ANTHROPIC_API_KEY` must be set in the environment. A `stop_reason: max_tokens` response is treated as a step failure.
+
 ## Validation
 
 ```bash
@@ -125,3 +159,4 @@ See `runbooks/examples/`:
 - `api-health.yaml` — HTTP health check (cron + curl)
 - `backup-freshness.yaml` — Backup-freshness check (cron)
 - `k8s-pod-restart-summary.yaml` — Periodic Pod-restart aggregation (cron + capture)
+- `error-analysis.yaml` — Analyzes error logs with Claude and suggests remediation (file + claude step)

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "./logger.js";
 import { runBashStep } from "../steps/bash-step.js";
-import type { Runbook, RunResult, StepResult, TriggerEvent } from "../types.js";
+import { runClaudeStep } from "../steps/claude-step.js";
+import type { Runbook, RunResult, Step, StepResult, TriggerEvent } from "../types.js";
 import type { StateStore } from "./state.js";
 
 const log = logger("executor");
@@ -69,7 +70,7 @@ async function runRunbook(
       continue;
     }
 
-    const r = await runBashStep(step, { event, capturedSteps });
+    const r = await runStep(step, { event, capturedSteps });
     results.push(r);
     if (r.captured !== null) capturedSteps[step.id] = r.captured;
     if (!r.ok) {
@@ -94,6 +95,7 @@ async function runRunbook(
   }
 
   const finished_at = new Date().toISOString();
+
   const result: RunResult = {
     run_id,
     runbook_id: runbook.id,
@@ -106,4 +108,12 @@ async function runRunbook(
   await state.appendRunResult(result);
   log.info({ run_id, runbook_id: runbook.id, ok: !anyFailed }, "runbook finished");
   return result;
+}
+
+function runStep(
+  step: Step,
+  ctx: { event: TriggerEvent; capturedSteps: Record<string, string> },
+): Promise<StepResult> {
+  if ("claude" in step) return runClaudeStep(step, ctx);
+  return runBashStep(step, ctx);
 }

@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Cron } from "croner";
 import YAML from "yaml";
-import type { Runbook, BashStep, Trigger } from "../types.js";
+import type { Runbook, BashStep, ClaudeStep, Step, Trigger } from "../types.js";
 
 export class RunbookValidationError extends Error {
   constructor(public readonly file: string, message: string) {
@@ -60,7 +60,7 @@ function validateRunbook(raw: unknown, file: string): Runbook {
     throw new RunbookValidationError(file, "cooldown_sec must be > 0");
 
   const trigger = validateTrigger(raw["trigger"], file);
-  const steps = validateSteps(raw["steps"], file);
+  const steps = validateSteps(raw["steps"], file, file);
 
   const rb: Runbook = {
     id,
@@ -107,19 +107,111 @@ function validateTrigger(raw: unknown, file: string): Trigger {
   throw new RunbookValidationError(file, `trigger.source must be "file" or "cron" (got: ${source})`);
 }
 
-function validateSteps(raw: unknown, file: string): BashStep[] {
+function validateSteps(raw: unknown, file: string, runbookFile: string): Step[] {
   if (!Array.isArray(raw) || raw.length === 0)
     throw new RunbookValidationError(file, "steps must be a non-empty array");
   const seen = new Set<string>();
-  const steps: BashStep[] = [];
+  const steps: Step[] = [];
   for (const [i, raw_] of raw.entries()) {
-    const step = validateBashStep(raw_, file, `steps[${i}]`);
+    const step =
+      isObject(raw_) && "claude" in raw_
+        ? validateClaudeStep(raw_, file, `steps[${i}]`, runbookFile)
+        : validateBashStep(raw_, file, `steps[${i}]`);
     if (seen.has(step.id))
       throw new RunbookValidationError(file, `duplicate step id: ${step.id}`);
     seen.add(step.id);
     steps.push(step);
   }
   return steps;
+}
+
+function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile: string): ClaudeStep {
+  if (!isObject(raw)) throw new RunbookValidationError(file, `${ctx} must be a mapping`);
+  const id = mustString(raw, "id", file, `${ctx}.id`);
+
+  const claudeRaw = raw["claude"];
+  if (!isObject(claudeRaw))
+    throw new RunbookValidationError(file, `${ctx}.claude must be a mapping`);
+
+  const hasPrompt = "prompt" in claudeRaw;
+  const hasPromptFile = "prompt_file" in claudeRaw;
+  if (!hasPrompt && !hasPromptFile)
+    throw new RunbookValidationError(file, `${ctx}.claude must have "prompt" or "prompt_file"`);
+  if (hasPrompt && hasPromptFile)
+    throw new RunbookValidationError(
+      file,
+      `${ctx}.claude cannot have both "prompt" and "prompt_file"`,
+    );
+
+  let prompt: string;
+  if (hasPromptFile) {
+    const relPath = mustString(claudeRaw, "prompt_file", file, `${ctx}.claude.prompt_file`);
+    const absPath = resolve(dirname(runbookFile), relPath);
+    try {
+      prompt = readFileSync(absPath, "utf8");
+    } catch {
+      throw new RunbookValidationError(
+        file,
+        `${ctx}.claude.prompt_file: cannot read file: ${absPath}`,
+      );
+    }
+  } else {
+    prompt = mustString(claudeRaw, "prompt", file, `${ctx}.claude.prompt`);
+  }
+
+  const hasSystem = "system" in claudeRaw;
+  const hasSystemFile = "system_file" in claudeRaw;
+  if (hasSystem && hasSystemFile)
+    throw new RunbookValidationError(
+      file,
+      `${ctx}.claude cannot have both "system" and "system_file"`,
+    );
+
+  let system: string | undefined;
+  if (hasSystemFile) {
+    const relPath = mustString(claudeRaw, "system_file", file, `${ctx}.claude.system_file`);
+    const absPath = resolve(dirname(runbookFile), relPath);
+    try {
+      system = readFileSync(absPath, "utf8");
+    } catch {
+      throw new RunbookValidationError(
+        file,
+        `${ctx}.claude.system_file: cannot read file: ${absPath}`,
+      );
+    }
+  } else if (hasSystem) {
+    system = mustString(claudeRaw, "system", file, `${ctx}.claude.system`);
+  }
+
+  const model =
+    optionalString(claudeRaw, "model", file, `${ctx}.claude.model`) ?? "claude-opus-4-7";
+  const max_tokens =
+    optionalNumber(claudeRaw, "max_tokens", file, `${ctx}.claude.max_tokens`) ?? 1024;
+  if (max_tokens <= 0)
+    throw new RunbookValidationError(file, `${ctx}.claude.max_tokens must be > 0`);
+
+  const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
+  if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
+  const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
+  if (onErrorRaw !== "stop" && onErrorRaw !== "continue")
+    throw new RunbookValidationError(file, `${ctx}.on_error must be "stop" or "continue"`);
+  const capture = optionalBoolean(raw, "capture", file, `${ctx}.capture`) ?? false;
+  const conditionRaw = optionalString(raw, "condition", file, `${ctx}.condition`);
+  if (
+    conditionRaw !== undefined &&
+    conditionRaw !== "always" &&
+    conditionRaw !== "on_success" &&
+    conditionRaw !== "on_failure"
+  )
+    throw new RunbookValidationError(
+      file,
+      `${ctx}.condition must be "always", "on_success", or "on_failure"`,
+    );
+  const condition = conditionRaw as ClaudeStep["condition"];
+  const claude = { prompt, model, max_tokens, ...(system !== undefined ? { system } : {}) };
+  const step: ClaudeStep = { id, claude, timeout_sec, on_error: onErrorRaw, capture };
+  if (condition !== undefined) step.condition = condition;
+  return step;
 }
 
 function validateBashStep(raw: unknown, file: string, ctx: string): BashStep {

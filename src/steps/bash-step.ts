@@ -6,10 +6,10 @@ const log = logger("step.bash");
 
 export interface BashStepContext {
   event: TriggerEvent;
-  // 直前までのステップで capture: true だったものの stdout（trailing newline 除去済み）。
-  // キーはランブックの step.id（kebab-case）。
   capturedSteps: Record<string, string>;
 }
+
+export type StepContext = BashStepContext;
 
 const TEMPLATE_RE =
   /\{\{\s*(event\.line|event\.path|event\.timestamp|env\.[A-Za-z_][A-Za-z0-9_]*|steps\.[a-z0-9][a-z0-9-]*\.output)\s*\}\}/g;

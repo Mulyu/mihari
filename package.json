@@ -1,7 +1,6 @@
 {
-  "name": "mihari",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@mulyu/mihari",
+  "version": "0.0.0",
   "description": "Local log file polling + bash runbook engine",
   "type": "module",
   "bin": {
@@ -10,11 +9,36 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc && chmod +x dist/cli.js",
     "check": "monban all",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mulyu/mihari.git"
+  },
+  "homepage": "https://github.com/Mulyu/mihari#readme",
+  "bugs": {
+    "url": "https://github.com/Mulyu/mihari/issues"
+  },
+  "keywords": [
+    "cli",
+    "log",
+    "monitoring",
+    "runbook",
+    "bash",
+    "claude-code"
+  ],
+  "author": "mulyu",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.93.0",
@@ -30,8 +54,5 @@
     "@types/proper-lockfile": "4.1.4",
     "typescript": "5.9.3",
     "vitest": "4.1.5"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }

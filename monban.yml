@@ -1,20 +1,8 @@
-exclude:
-  - "**/node_modules/**"
-
-content:
-  forbidden:
-    - path: "**/*"
-      conflict: true
-      severity: error
-    - path: "**/*"
-      secret: true
-      severity: warn
-    - path: "**/*"
-      invisible: true
-      severity: warn
-    - path: "**/*.md"
-      injection: true
-      severity: warn
+extends:
+  - type: github
+    repo: Mulyu/okite
+    ref: main
+    path: monban.yml
 
 doc:
   link:
@@ -35,9 +23,6 @@ git:
         - "**/yarn.lock"
         - "**/pnpm-lock.yaml"
         - "**/__snapshots__/**"
-      severity: warn
-    ignored:
-      scope: diff
       severity: warn
   branch_name:
     pattern: "^(main|claude/[A-Za-z0-9-]+)$"

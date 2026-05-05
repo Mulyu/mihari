@@ -1,4 +1,4 @@
-import type { StepContext } from "../types.js";
+import type { StepContext } from "../types/index.js";
 
 // 全ステップで共通のテンプレ字句構造。
 // 拾うキー: event.line / event.path / event.timestamp / env.<NAME> / steps.<id>.output
@@ -12,7 +12,7 @@ export function normalizeStepEnvName(stepId: string): string {
 // bash 用展開: 値は env 経由で渡し、テンプレは ${VAR} に置換する（裸）。
 // 引用は呼び出し側責務（`echo "{{ event.line }}"` のように囲む）。
 // 自前で `"$VAR"` を生成すると、ユーザの `"... {{ ... }} ..."` と隣接して
-// 引用が崩れ、IFS による単語分割で改行が空白化するなどの罠がある。
+// 引用が崩れ、IFS による単語分割で改行が空白化されるなどの罠がある。
 export function substituteBashTemplate(bash: string): string {
   return bash.replace(TEMPLATE_RE, (raw, key: string) => {
     if (key === "event.line") return "${MIHARI_EVENT_LINE}";

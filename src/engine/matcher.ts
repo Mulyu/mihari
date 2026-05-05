@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { FileTrigger, Match, Runbook, TriggerEvent } from "../types.js";
+import type { FileTrigger, Match, Runbook, TriggerEvent } from "../types/index.js";
 
 type FileRunbook = Runbook & { trigger: FileTrigger };
 

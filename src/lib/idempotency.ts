@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { TriggerEvent } from "../types.js";
+import type { TriggerEvent } from "../types/index.js";
 
 // 1ティック1イベントごとに決定的に算出する識別子。
 // 同じトリガーイベントが再観測されたとき同じ値になり、ランブック著者がこれをキーに

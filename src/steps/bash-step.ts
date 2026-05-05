@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { logger } from "../lib/logger.js";
-import type { BashStep, StepContext, StepResult } from "../types.js";
+import type { BashStep, StepContext, StepResult } from "../types/index.js";
 import {
   captureStdout,
   normalizeStepEnvName,

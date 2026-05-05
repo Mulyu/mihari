@@ -3,7 +3,7 @@ import type { Executor } from "./executor.js";
 import type { CronScheduler } from "../triggers/cron.js";
 import type { FilePoller } from "../triggers/file.js";
 import type { StateStore } from "../state/store.js";
-import type { Runbook } from "../types.js";
+import type { Runbook } from "../types/index.js";
 
 export interface DispatcherInput {
   runbooks: Runbook[];

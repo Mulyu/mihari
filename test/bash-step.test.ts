@@ -79,21 +79,30 @@ describe("captureStdout", () => {
 
 describe("buildEnv", () => {
   it("populates MIHARI_EVENT_* from a file event", () => {
-    const env = buildEnv({}, step(), { event: fileEvent, capturedSteps: {} });
+    const env = buildEnv({}, step(), { event: fileEvent, capturedSteps: {}, idempotencyKey: "test-key" });
     expect(env["MIHARI_EVENT_LINE"]).toBe(fileEvent.content);
     expect(env["MIHARI_EVENT_PATH"]).toBe(fileEvent.path);
     expect(env["MIHARI_EVENT_TIMESTAMP"]).toBe(fileEvent.timestamp);
   });
 
+  it("exposes MIHARI_IDEMPOTENCY_KEY from the context", () => {
+    const env = buildEnv({}, step(), {
+      event: fileEvent,
+      capturedSteps: {},
+      idempotencyKey: "abc123def456",
+    });
+    expect(env["MIHARI_IDEMPOTENCY_KEY"]).toBe("abc123def456");
+  });
+
   it("blanks line/path on a cron event but keeps timestamp", () => {
-    const env = buildEnv({}, step(), { event: cronEvent, capturedSteps: {} });
+    const env = buildEnv({}, step(), { event: cronEvent, capturedSteps: {}, idempotencyKey: "test-key" });
     expect(env["MIHARI_EVENT_LINE"]).toBe("");
     expect(env["MIHARI_EVENT_PATH"]).toBe("");
     expect(env["MIHARI_EVENT_TIMESTAMP"]).toBe(cronEvent.timestamp);
   });
 
   it("blanks line/path on a manual event but keeps timestamp", () => {
-    const env = buildEnv({}, step(), { event: manualEvent, capturedSteps: {} });
+    const env = buildEnv({}, step(), { event: manualEvent, capturedSteps: {}, idempotencyKey: "test-key" });
     expect(env["MIHARI_EVENT_LINE"]).toBe("");
     expect(env["MIHARI_EVENT_PATH"]).toBe("");
     expect(env["MIHARI_EVENT_TIMESTAMP"]).toBe(manualEvent.timestamp);
@@ -102,7 +111,7 @@ describe("buildEnv", () => {
   it("merges step env over base env", () => {
     const env = buildEnv({ FOO: "base" }, step({ env: { FOO: "step" } }), {
       event: cronEvent,
-      capturedSteps: {},
+      capturedSteps: {}, idempotencyKey: "test-key",
     });
     expect(env["FOO"]).toBe("step");
   });
@@ -110,7 +119,7 @@ describe("buildEnv", () => {
   it("exposes captured step outputs as MIHARI_STEP_<NORMALIZED>", () => {
     const env = buildEnv({}, step(), {
       event: cronEvent,
-      capturedSteps: { "list-clusters": "abc", "single": "xyz" },
+      capturedSteps: { "list-clusters": "abc", "single": "xyz" }, idempotencyKey: "test-key",
     });
     expect(env["MIHARI_STEP_LIST_CLUSTERS"]).toBe("abc");
     expect(env["MIHARI_STEP_SINGLE"]).toBe("xyz");
@@ -121,7 +130,7 @@ describe("runBashStep", () => {
   it("runs successful commands", async () => {
     const r = await runBashStep(step({ bash: "echo hello" }), {
       event: cronEvent,
-      capturedSteps: {},
+      capturedSteps: {}, idempotencyKey: "test-key",
     });
     expect(r.ok).toBe(true);
     expect(r.exit_code).toBe(0);
@@ -131,7 +140,7 @@ describe("runBashStep", () => {
   it("captures non-zero exit", async () => {
     const r = await runBashStep(step({ bash: "exit 7" }), {
       event: cronEvent,
-      capturedSteps: {},
+      capturedSteps: {}, idempotencyKey: "test-key",
     });
     expect(r.ok).toBe(false);
     expect(r.exit_code).toBe(7);
@@ -142,7 +151,7 @@ describe("runBashStep", () => {
     // travel through env vars and never touch shell parsing as code.
     const r = await runBashStep(
       step({ bash: 'echo "{{ event.line }}"' }),
-      { event: fileEvent, capturedSteps: {} },
+      { event: fileEvent, capturedSteps: {}, idempotencyKey: "test-key" },
     );
     expect(r.ok).toBe(true);
     expect(r.stdout).toContain('evil "; rm -rf /"');
@@ -151,7 +160,7 @@ describe("runBashStep", () => {
   it("times out long-running commands", async () => {
     const r = await runBashStep(step({ bash: "sleep 5", timeout_sec: 1 }), {
       event: cronEvent,
-      capturedSteps: {},
+      capturedSteps: {}, idempotencyKey: "test-key",
     });
     expect(r.ok).toBe(false);
     expect(r.timed_out).toBe(true);
@@ -160,7 +169,7 @@ describe("runBashStep", () => {
   it("returns captured=null when capture is false", async () => {
     const r = await runBashStep(step({ bash: "echo hi", capture: false }), {
       event: cronEvent,
-      capturedSteps: {},
+      capturedSteps: {}, idempotencyKey: "test-key",
     });
     expect(r.captured).toBeNull();
   });
@@ -168,7 +177,7 @@ describe("runBashStep", () => {
   it("returns trimmed stdout in captured when capture is true", async () => {
     const r = await runBashStep(step({ bash: "echo hi", capture: true }), {
       event: cronEvent,
-      capturedSteps: {},
+      capturedSteps: {}, idempotencyKey: "test-key",
     });
     expect(r.captured).toBe("hi");
   });
@@ -176,7 +185,7 @@ describe("runBashStep", () => {
   it("captured is null when the step fails (do not propagate broken output)", async () => {
     const r = await runBashStep(
       step({ bash: "echo broken && exit 1", capture: true }),
-      { event: cronEvent, capturedSteps: {} },
+      { event: cronEvent, capturedSteps: {}, idempotencyKey: "test-key" },
     );
     expect(r.ok).toBe(false);
     expect(r.captured).toBeNull();
@@ -188,7 +197,7 @@ describe("runBashStep", () => {
       step({ id: "user", bash: 'echo "user={{ steps.list-clusters.output }}"' }),
       {
         event: cronEvent,
-        capturedSteps: { "list-clusters": "alpha\nbeta" },
+        capturedSteps: { "list-clusters": "alpha\nbeta" }, idempotencyKey: "test-key",
       },
     );
     expect(r.ok).toBe(true);

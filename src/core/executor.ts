@@ -3,6 +3,7 @@ import { logger } from "./logger.js";
 import { runBashStep } from "../steps/bash-step.js";
 import { runClaudeStep } from "../steps/claude-step.js";
 import { runClaudeAgentStep } from "../steps/claude-agent-step.js";
+import { computeIdempotencyKey } from "./idempotency.js";
 import type { Runbook, RunResult, Step, StepResult, TriggerEvent } from "../types.js";
 import type { StateStore } from "./state.js";
 
@@ -29,6 +30,9 @@ async function runRunbook(
   const started_at = new Date().toISOString();
   const results: StepResult[] = [];
   const capturedSteps: Record<string, string> = {};
+  // 同じトリガーイベントが再観測されたら同じ値が出る決定的キー。
+  // ランブック著者が冪等性キーとして使えるよう全ステップに env / SDK 経由で渡す。
+  const idempotencyKey = computeIdempotencyKey(runbook.id, event);
 
   log.info(
     { run_id, runbook_id: runbook.id, trigger_type: event.type },
@@ -71,7 +75,7 @@ async function runRunbook(
       continue;
     }
 
-    const r = await runStep(step, { event, capturedSteps });
+    const r = await runStep(step, { event, capturedSteps, idempotencyKey });
     results.push(r);
     if (r.captured !== null) capturedSteps[step.id] = r.captured;
     if (!r.ok) {
@@ -113,7 +117,7 @@ async function runRunbook(
 
 function runStep(
   step: Step,
-  ctx: { event: TriggerEvent; capturedSteps: Record<string, string> },
+  ctx: { event: TriggerEvent; capturedSteps: Record<string, string>; idempotencyKey: string },
 ): Promise<StepResult> {
   if ("claude_agent" in step) return runClaudeAgentStep(step, ctx);
   if ("claude" in step) return runClaudeStep(step, ctx);

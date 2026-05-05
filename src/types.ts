@@ -64,6 +64,9 @@ export interface ClaudeAgentStep {
     permission_mode: "strict" | "bypass";
     // 絶対パス。省略時は process.cwd()。
     cwd?: string;
+    // 既定の運用規約（PR 重複検知 / 決定的 branch 命名 / dirty tree チェック）を
+    // system prompt に自動 append するか。既定 true。
+    conventions: boolean;
   };
   timeout_sec: number;
   on_error: "stop" | "continue";

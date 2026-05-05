@@ -309,6 +309,9 @@ function validateClaudeAgentStep(
   if (cwd !== undefined && !cwd.startsWith("/"))
     throw new RunbookValidationError(file, `${ctx}.claude_agent.cwd must be an absolute path`);
 
+  const conventions =
+    optionalBoolean(cfgRaw, "conventions", file, `${ctx}.claude_agent.conventions`) ?? true;
+
   const timeout_sec = optionalNumber(raw, "timeout_sec", file, `${ctx}.timeout_sec`) ?? 60;
   if (timeout_sec <= 0) throw new RunbookValidationError(file, `${ctx}.timeout_sec must be > 0`);
   const onErrorRaw = optionalString(raw, "on_error", file, `${ctx}.on_error`) ?? "stop";
@@ -333,6 +336,7 @@ function validateClaudeAgentStep(
     model,
     allowed_tools,
     permission_mode: pmRaw,
+    conventions,
     ...(system !== undefined ? { system } : {}),
     ...(max_turns !== undefined ? { max_turns } : {}),
     ...(cwd !== undefined ? { cwd } : {}),

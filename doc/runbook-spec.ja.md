@@ -153,6 +153,16 @@ Claude Agent SDK でエージェントループを回す独立ステップ種別
 | `claude_agent.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
 | `claude_agent.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
 | `claude_agent.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
+| `claude_agent.conventions` | `true`（デフォ）で、`claude/fix-$MIHARI_IDEMPOTENCY_KEY` を branch 名に使い、既存 branch / open PR / dirty tree を検知した場合はスキップする運用規約を system prompt に自動 append する。生のままで動かしたいときは `false` |
+
+#### 組み込み idempotency 規約
+
+`conventions: true`（デフォ）のとき、ランブック著者が prompt に毎回 dedup ボイラープレートを書かなくても済むよう、mihari が以下を自動でやる:
+
+1. **`MIHARI_IDEMPOTENCY_KEY`** — runbook id とトリガーイベント（file の場合はパス + 行、cron の場合は発火スロット、manual の場合は timestamp）から決定的に sha1 で計算した 12 文字 hex。同じトリガーが再観測されたら同じ値になる。`bash` ステップの env としても、`claude_agent` の Bash ツールにも自動的に渡す
+2. **運用規約の preamble** — 利用者の `system` プロンプトの**前に**固定パラグラフを挟む。「PR を開く類のタスクなら `git status` が dirty なら中止 / `claude/fix-$MIHARI_IDEMPOTENCY_KEY` の branch がリモートにあれば中止 / そのキーがタイトルに含まれる open PR があれば中止 / すべて通ったら同名 branch を作って PR タイトルにキーを含める」と指示する。PR を開かないタスク（ファイル出力やマイグレーション等）は preamble を無視するよう書いてある
+
+`conventions: false` で preamble を切れる。`MIHARI_IDEMPOTENCY_KEY` env の export は残るので、ランブック著者が明示的に参照したい場合はそのまま使える。
 
 段階制御は `allowed_tools` の中身だけで決まる：
 
@@ -182,6 +192,14 @@ bash: |
   echo "matched: {{ event.line }}"     # 良い
   echo matched: {{ event.line }}       # 危険：IFS で単語分割される
 ```
+
+`bash` ステップには下記の env も渡される（`{{ ... }}` は使わない）:
+
+| Env | 内容 |
+|---|---|
+| `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` | `event.*` テンプレと同じ値 |
+| `MIHARI_STEP_<ID>` | `capture: true` の前段ステップの stdout（id を大文字化、`-` は `_` に） |
+| `MIHARI_IDEMPOTENCY_KEY` | (runbook id, トリガーイベント) ペアに対して決定的な 12 文字 sha1 hex。`claude_agent` の組み込み規約も同じ値を使う |
 
 ## バリデーション
 

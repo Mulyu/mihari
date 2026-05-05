@@ -8,6 +8,34 @@ import {
 
 const log = logger("step.claude-agent");
 
+// 規約 ON のとき system prompt に append する固定パラグラフ。
+// 「PR を開く類のタスクのときだけ追従し、それ以外は無視せよ」と明示的に書くことで、
+// 副作用が PR 作成と無関係なエージェント（レポート出力など）も誤動作しない。
+// $MIHARI_IDEMPOTENCY_KEY は env 経由で SDK 子プロセスに常に渡している。
+const CONVENTIONS_PREAMBLE = `You are running as a mihari claude_agent step.
+The following operational conventions apply WHEN your task involves opening a
+pull request in a git repository — for non-PR tasks (writing a report file,
+running a migration, etc.) ignore them and proceed normally.
+
+A deterministic key for this run is exposed as $MIHARI_IDEMPOTENCY_KEY.
+The same trigger observed twice produces the same key, so the conventions
+below let you detect and skip duplicate work.
+
+Before making any change, run these checks in order and stop early on a hit:
+  1. \`git status --porcelain\` — if it prints anything, stop and report
+     "skip: dirty tree". Do not modify any file.
+  2. \`git ls-remote --exit-code origin "refs/heads/claude/fix-$MIHARI_IDEMPOTENCY_KEY"\`
+     — if it succeeds, stop and report "skip: branch exists".
+  3. \`gh pr list --state open --search "$MIHARI_IDEMPOTENCY_KEY in:title"\` —
+     if any PR is returned, stop and report "skip: PR exists <url>".
+
+If all three checks pass:
+  - Use exactly \`claude/fix-$MIHARI_IDEMPOTENCY_KEY\` as the branch name.
+  - Include \`[$MIHARI_IDEMPOTENCY_KEY]\` somewhere in the PR title so future
+    runs can recognise the duplicate.
+
+Set \`conventions: false\` on the step to disable this preamble entirely.`;
+
 // allowed_tools エントリと実際の tool 呼び出しを照合する。
 // "Read" / "Edit" などはツール名一致。
 // "Bash(git status)" はコマンド完全一致、"Bash(git push:*)" は "git push" もしくは
@@ -48,6 +76,13 @@ export async function runClaudeAgentStep(
   const allowed = step.claude_agent.allowed_tools;
   const pm = step.claude_agent.permission_mode;
   const cwd = step.claude_agent.cwd ?? process.cwd();
+  // conventions ON の場合は規約パラグラフをユーザの system 指示の前に置く。
+  // ユーザ側 system が後に来るので、特定タスクで規約を上書きしたければそこに書ける。
+  const composedSystem = step.claude_agent.conventions
+    ? system !== undefined
+      ? `${CONVENTIONS_PREAMBLE}\n\n${system}`
+      : CONVENTIONS_PREAMBLE
+    : system;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), step.timeout_sec * 1000);
 
@@ -71,12 +106,18 @@ export async function runClaudeAgentStep(
       abortController: controller,
       permissionMode: sdkPermissionMode,
       allowedTools: allowed,
+      // SDK 子プロセスに env 経由で冪等性キーを渡す。Bash ツールから $MIHARI_IDEMPOTENCY_KEY で参照可。
+      env: { ...process.env, MIHARI_IDEMPOTENCY_KEY: ctx.idempotencyKey },
     };
     if (step.claude_agent.max_turns !== undefined)
       baseOptions["maxTurns"] = step.claude_agent.max_turns;
-    if (system !== undefined) {
+    if (composedSystem !== undefined) {
       // claude_code preset の上に append する形で system 指示を追加する。
-      baseOptions["systemPrompt"] = { type: "preset", preset: "claude_code", append: system };
+      baseOptions["systemPrompt"] = {
+        type: "preset",
+        preset: "claude_code",
+        append: composedSystem,
+      };
     }
     if (pm === "bypass") {
       baseOptions["allowDangerouslySkipPermissions"] = true;

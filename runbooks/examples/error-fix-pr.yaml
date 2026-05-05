@@ -4,6 +4,9 @@ trigger:
   source: file
   path: /var/log/myapp.log
   pattern: "ERROR"
+# Suppress refiring within 5 minutes; the built-in idempotency conventions
+# in claude_agent handle longer-lived duplicates (existing branch / open PR).
+cooldown_sec: 300
 
 steps:
   - id: get-context
@@ -14,9 +17,9 @@ steps:
   - id: fix-and-pr
     claude_agent:
       model: claude-opus-4-7
-      system: |
-        You are a senior engineer working on the repository at the given cwd.
-        Stay focused on the reported error. Make minimal, well-scoped changes.
+      # Opt into the built-in idempotency preamble: claude/fix-$KEY branch
+      # naming + skip on existing branch / open PR / dirty tree.
+      conventions: true
       prompt: |
         An error was reported in the application log:
 
@@ -26,28 +29,23 @@ steps:
 
           {{ steps.get-context.output }}
 
-        Steps to take:
-        1. Investigate the codebase to identify the root cause.
-        2. Create a new branch named claude/fix-<short-description>.
-        3. Apply the minimal fix and run any obvious sanity checks.
-        4. Commit with a descriptive message.
-        5. Push the branch.
-        6. Open a pull request with a summary of the cause and the fix.
-
-        Stop after the PR is opened. Report the PR URL in your final message.
+        Find the root cause, fix it, and open a pull request describing the
+        cause and the fix.
       allowed_tools:
         - Read
         - Edit
         - Write
         - Glob
         - Grep
-        - "Bash(git status)"
+        - "Bash(git status:*)"
         - "Bash(git diff:*)"
         - "Bash(git log:*)"
+        - "Bash(git ls-remote:*)"
         - "Bash(git switch:*)"
         - "Bash(git add:*)"
         - "Bash(git commit:*)"
         - "Bash(git push:*)"
+        - "Bash(gh pr list:*)"
         - "Bash(gh pr create:*)"
       permission_mode: strict
       max_turns: 40
@@ -57,6 +55,9 @@ steps:
 
   - id: record
     bash: |
-      printf '%s\t%s\n' "{{ event.timestamp }}" "{{ steps.fix-and-pr.output }}" \
+      printf '%s\t%s\t%s\n' \
+        "{{ event.timestamp }}" \
+        "${MIHARI_IDEMPOTENCY_KEY}" \
+        "{{ steps.fix-and-pr.output }}" \
         >> /var/log/mihari/error-fix-pr.log
     condition: always

@@ -7,6 +7,7 @@ const log = logger("step.bash");
 export interface BashStepContext {
   event: TriggerEvent;
   capturedSteps: Record<string, string>;
+  idempotencyKey: string;
 }
 
 export type StepContext = BashStepContext;
@@ -46,6 +47,7 @@ export function buildEnv(
   env["MIHARI_EVENT_LINE"] = ctx.event.type === "file" ? ctx.event.content : "";
   env["MIHARI_EVENT_PATH"] = ctx.event.type === "file" ? ctx.event.path : "";
   env["MIHARI_EVENT_TIMESTAMP"] = ctx.event.timestamp;
+  env["MIHARI_IDEMPOTENCY_KEY"] = ctx.idempotencyKey;
   for (const [stepId, value] of Object.entries(ctx.capturedSteps)) {
     env[`MIHARI_STEP_${normalizeStepEnvName(stepId)}`] = value;
   }

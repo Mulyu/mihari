@@ -7,6 +7,7 @@ const log = logger("step.claude");
 export interface StepContext {
   event: TriggerEvent;
   capturedSteps: Record<string, string>;
+  idempotencyKey: string;
 }
 
 const TEMPLATE_RE =

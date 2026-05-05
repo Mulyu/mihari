@@ -358,7 +358,7 @@ steps:
         - Write
         - "Bash(git status)"
         - "Bash(git push:*)"
-      permission_mode: accept-edits
+      permission_mode: strict
       max_turns: 15
       cwd: /home/user/repo
 `.trim();
@@ -375,7 +375,7 @@ steps:
       "Bash(git status)",
       "Bash(git push:*)",
     ]);
-    expect(step.claude.permission_mode).toBe("accept-edits");
+    expect(step.claude.permission_mode).toBe("strict");
     expect(step.claude.max_turns).toBe(15);
     expect(step.claude.cwd).toBe("/home/user/repo");
   });

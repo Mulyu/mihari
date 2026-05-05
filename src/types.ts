@@ -46,9 +46,9 @@ export interface ClaudeStep {
     allowed_tools?: string[];
     // agent: true 時のみ有効。SDK の maxTurns に対応。
     max_turns?: number;
-    // agent: true 時のみ有効。"accept-edits" は edit 自動承認 + allowed_tools 範囲のみ実行可。
+    // agent: true 時のみ有効。"strict" は allowed_tools に無い tool 呼び出しを全て deny。
     // "bypass" は全ツールを許可（allowDangerouslySkipPermissions = true）。
-    permission_mode?: "accept-edits" | "bypass";
+    permission_mode?: "strict" | "bypass";
     // agent: true 時のみ有効。絶対パス。省略時は process.cwd()。
     cwd?: string;
   };

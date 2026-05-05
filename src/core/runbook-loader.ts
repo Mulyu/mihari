@@ -200,10 +200,10 @@ function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile
   if (max_turns !== undefined && max_turns <= 0)
     throw new RunbookValidationError(file, `${ctx}.claude.max_turns must be > 0`);
   const pmRaw = optionalString(claudeRaw, "permission_mode", file, `${ctx}.claude.permission_mode`);
-  if (pmRaw !== undefined && pmRaw !== "accept-edits" && pmRaw !== "bypass")
+  if (pmRaw !== undefined && pmRaw !== "strict" && pmRaw !== "bypass")
     throw new RunbookValidationError(
       file,
-      `${ctx}.claude.permission_mode must be "accept-edits" or "bypass"`,
+      `${ctx}.claude.permission_mode must be "strict" or "bypass"`,
     );
   const cwd = optionalString(claudeRaw, "cwd", file, `${ctx}.claude.cwd`);
   if (cwd !== undefined && !cwd.startsWith("/"))
@@ -255,7 +255,7 @@ function validateClaudeStep(raw: unknown, file: string, ctx: string, runbookFile
     claude.agent = true;
     if (allowed_tools !== undefined) claude.allowed_tools = allowed_tools;
     if (max_turns !== undefined) claude.max_turns = max_turns;
-    if (pmRaw !== undefined) claude.permission_mode = pmRaw as "accept-edits" | "bypass";
+    if (pmRaw !== undefined) claude.permission_mode = pmRaw as "strict" | "bypass";
     if (cwd !== undefined) claude.cwd = cwd;
   }
   const step: ClaudeStep = { id, claude, timeout_sec, on_error: onErrorRaw, capture };

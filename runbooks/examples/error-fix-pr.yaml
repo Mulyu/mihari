@@ -50,7 +50,7 @@ steps:
         - "Bash(git commit:*)"
         - "Bash(git push:*)"
         - "Bash(gh pr create:*)"
-      permission_mode: accept-edits
+      permission_mode: strict
       max_turns: 40
       cwd: /home/user/myrepo
     capture: true

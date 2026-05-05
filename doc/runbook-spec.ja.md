@@ -135,7 +135,7 @@ stdout / stderr はログと履歴 JSONL に記録される。
       - "Bash(git commit:*)"
       - "Bash(git push:*)"
       - "Bash(gh pr create:*)"
-    permission_mode: accept-edits
+    permission_mode: strict
     max_turns: 30
     cwd: /home/user/myrepo
   timeout_sec: 600
@@ -145,7 +145,7 @@ stdout / stderr はログと履歴 JSONL に記録される。
 |---|---|
 | `claude.agent` | `true` で agent モード（デフォ `false`） |
 | `claude.allowed_tools` | ツール許可リスト。素のツール名（`Read` 等）と `Bash(<command>:*)` / `Bash(<exact>)` パターン。リスト外は prompt なしで deny |
-| `claude.permission_mode` | `accept-edits`（デフォ。`allowed_tools` に列挙したものだけ実行） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
+| `claude.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
 | `claude.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
 | `claude.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
 

@@ -138,11 +138,8 @@ async function runAgentBranch(
   system: string | undefined,
   start: number,
 ): Promise<StepResult> {
-  // 動的 import: agent モードを使わない利用者には @anthropic-ai/claude-agent-sdk のロードを発生させない。
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-
   const allowed = step.claude.allowed_tools ?? [];
-  const pm = step.claude.permission_mode ?? "accept-edits";
+  const pm = step.claude.permission_mode ?? "strict";
   const cwd = step.claude.cwd ?? process.cwd();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), step.timeout_sec * 1000);
@@ -153,7 +150,14 @@ async function runAgentBranch(
   let timedOut = false;
 
   try {
-    const sdkPermissionMode = pm === "bypass" ? "bypassPermissions" : "acceptEdits";
+    // 動的 import は try 内に置く: 未インストール / プラットフォーム非対応 等の load 失敗を
+    // ステップ単位の StepResult として扱い、ランブック全体を巻き込まないようにする。
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+
+    // strict: SDK 標準の権限フローを起動させず、canUseTool で全 tool 呼び出しを判定する。
+    // acceptEdits を使うと Edit/Write 等が canUseTool より先に auto-approve されてしまい、
+    // allowed_tools に Edit/Write を載せていない runbook（read-only 用途）でファイル変更を許してしまう。
+    const sdkPermissionMode = pm === "bypass" ? "bypassPermissions" : "default";
     const baseOptions: Record<string, unknown> = {
       cwd,
       model: step.claude.model,
@@ -169,8 +173,8 @@ async function runAgentBranch(
     if (pm === "bypass") {
       baseOptions["allowDangerouslySkipPermissions"] = true;
     } else {
-      // accept-edits: allowed_tools に無い tool 呼び出しは fail-closed で deny する。
-      // headless 実行で permission prompt によりブロックされない保証。
+      // strict: allowed_tools に無い tool 呼び出しは fail-closed で deny する。
+      // headless 実行で permission prompt によりブロックされない保証も兼ねる。
       baseOptions["canUseTool"] = async (
         toolName: string,
         input: Record<string, unknown>,

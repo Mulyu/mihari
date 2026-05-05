@@ -165,7 +165,7 @@ Setting `claude.agent: true` switches the step to the Claude Agent SDK, giving t
       - "Bash(git commit:*)"
       - "Bash(git push:*)"
       - "Bash(gh pr create:*)"
-    permission_mode: accept-edits
+    permission_mode: strict
     max_turns: 30
     cwd: /home/user/myrepo
   timeout_sec: 600
@@ -175,7 +175,7 @@ Setting `claude.agent: true` switches the step to the Claude Agent SDK, giving t
 |----------|------|
 | `claude.agent` | `true` enables agent mode (default `false`) |
 | `claude.allowed_tools` | Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. |
-| `claude.permission_mode` | `accept-edits` (default; only `allowed_tools` entries run) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
+| `claude.permission_mode` | `strict` (default; every tool call goes through `canUseTool` and is denied unless it matches `allowed_tools`) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
 | `claude.max_turns` | Maximum agentic turns before the SDK stops (no default — SDK default applies) |
 | `claude.cwd` | Absolute path the agent operates in. Defaults to the directory mihari was started in. |
 

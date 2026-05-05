@@ -8,7 +8,7 @@
 
 - `file` トリガー: ログファイルを tail し、新規行が正規表現にマッチで発火
 - `cron` トリガー: 5フィールド cron 式で定期発火
-- ステップは `bash` のみ
+- ステップは `bash` と `claude` をサポート
 - state は `~/.mihari/state/` にローカル保存
 
 ## 設計原則
@@ -16,7 +16,7 @@
 1. **ポーリングのみ。Webhook は作らない。** inotify も使わない。シンプルさと移植性を優先。
 2. **重複実行は許容、冪等性はランブック側責務。** state でベストエフォートで防ぐが「絶対1回」は捨てる。
 3. **state 書き込み失敗は fail-open。** ログだけ残して処理続行。state 破損で全ポーリングが止まるほうが運用上のリスクが大きい。
-4. **ステップは bash のみ。** Claude / 承認フロー / HTTP 等は将来拡張として置いておくが、コードもドキュメントも書かない。
+4. **ステップは bash と claude。** 承認フロー / HTTP 等は将来拡張として置いておくが、コードもドキュメントも書かない。
 5. **ローカル前提。** リモート同期しない、複数マシン対応しない。
 
 ## ディレクトリ構造
@@ -39,7 +39,8 @@ mihari/
 │   │   ├── executor.ts         # execute(runbook, event) ステップループ
 │   │   └── state.ts            # ~/.mihari/state I/O
 │   ├── steps/
-│   │   └── bash-step.ts        # spawn bash + テンプレ展開（注入安全）
+│   │   ├── bash-step.ts        # spawn bash + テンプレ展開（注入安全）
+│   │   └── claude-step.ts      # Anthropic SDK 呼び出し + テンプレ展開（直接置換）
 │   ├── pollers/
 │   │   ├── file.ts             # tail（offset/inode/size 判定）
 │   │   └── cron.ts             # croner で発火判定

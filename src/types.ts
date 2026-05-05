@@ -1,10 +1,12 @@
 export type Trigger = FileTrigger | CronTrigger;
 
+export type Step = BashStep | ClaudeStep;
+
 export interface Runbook {
   id: string;
   description?: string;
   trigger: Trigger;
-  steps: BashStep[];
+  steps: Step[];
   sourcePath: string;
   enabled?: boolean;
   cooldown_sec?: number;
@@ -27,6 +29,20 @@ export interface BashStep {
   timeout_sec: number;
   on_error: "stop" | "continue";
   env: Record<string, string>;
+  capture: boolean;
+  condition?: "always" | "on_success" | "on_failure";
+}
+
+export interface ClaudeStep {
+  id: string;
+  claude: {
+    prompt: string;
+    system?: string;
+    model: string;
+    max_tokens: number;
+  };
+  timeout_sec: number;
+  on_error: "stop" | "continue";
   capture: boolean;
   condition?: "always" | "on_success" | "on_failure";
 }

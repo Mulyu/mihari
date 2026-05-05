@@ -145,7 +145,7 @@ steps: []
     expect(() => loadRunbookFile(f)).toThrow(/non-empty array/);
   });
 
-  it("rejects step with non-bash", () => {
+  it("rejects step with unsupported type", () => {
     const f = join(dir, "rb.yaml");
     writeFileSync(
       f,
@@ -157,8 +157,8 @@ trigger:
   pattern: x
 steps:
   - id: x
-    claude:
-      prompt: hi
+    webhook:
+      url: https://example.com
 `.trim(),
     );
     expect(() => loadRunbookFile(f)).toThrow(/bash/);
@@ -216,6 +216,128 @@ steps:
     const f = join(dir, "rb.yaml");
     writeFileSync(f, VALID_CRON.replace("source: cron", "source: webhook"));
     expect(() => loadRunbookFile(f)).toThrow(/source must be/);
+  });
+});
+
+describe("claude steps", () => {
+  const VALID_CLAUDE = `
+id: analyze
+trigger:
+  source: file
+  path: /var/log/app.log
+  pattern: "ERROR"
+steps:
+  - id: ask
+    claude:
+      prompt: "What does this mean: {{ event.line }}"
+`.trim();
+
+  it("loads a valid claude step with inline prompt", () => {
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, VALID_CLAUDE);
+    const rb = loadRunbookFile(f);
+    expect(rb.steps).toHaveLength(1);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.claude.prompt).toContain("{{ event.line }}");
+    expect(step.claude.model).toBe("claude-opus-4-7");
+    expect(step.claude.max_tokens).toBe(1024);
+    expect(step.timeout_sec).toBe(60);
+    expect(step.on_error).toBe("stop");
+    expect(step.capture).toBe(false);
+  });
+
+  it("loads claude step with prompt_file", () => {
+    const promptFile = join(dir, "prompt.md");
+    writeFileSync(promptFile, "Analyze this error.");
+    const yaml = VALID_CLAUDE.replace(
+      '      prompt: "What does this mean: {{ event.line }}"',
+      "      prompt_file: prompt.md",
+    );
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.claude.prompt).toBe("Analyze this error.");
+  });
+
+  it("loads claude step with system", () => {
+    const yaml = VALID_CLAUDE + "\n      system: You are an expert.";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.claude.system).toBe("You are an expert.");
+  });
+
+  it("loads claude step with system_file", () => {
+    const sysFile = join(dir, "system.md");
+    writeFileSync(sysFile, "You are a DevOps expert.");
+    const yaml = VALID_CLAUDE + "\n      system_file: system.md";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.claude.system).toBe("You are a DevOps expert.");
+  });
+
+  it("rejects both prompt and prompt_file", () => {
+    const yaml = VALID_CLAUDE + "\n      prompt_file: nope.md";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    expect(() => loadRunbookFile(f)).toThrow(/both "prompt" and "prompt_file"/);
+  });
+
+  it("rejects both system and system_file", () => {
+    const yaml = VALID_CLAUDE + "\n      system: hi\n      system_file: nope.md";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    expect(() => loadRunbookFile(f)).toThrow(/both "system" and "system_file"/);
+  });
+
+  it("rejects prompt_file that does not exist", () => {
+    const yaml = VALID_CLAUDE.replace(
+      '      prompt: "What does this mean: {{ event.line }}"',
+      "      prompt_file: no-such-file.md",
+    );
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    expect(() => loadRunbookFile(f)).toThrow(/cannot read file/);
+  });
+
+  it("accepts custom model and max_tokens", () => {
+    const yaml =
+      VALID_CLAUDE + "\n      model: claude-haiku-4-5\n      max_tokens: 512";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.claude.model).toBe("claude-haiku-4-5");
+    expect(step.claude.max_tokens).toBe(512);
+  });
+
+  it("accepts capture: true on claude step", () => {
+    const yaml = VALID_CLAUDE + "\n    capture: true";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.capture).toBe(true);
+  });
+
+  it("accepts condition on claude step", () => {
+    const yaml = VALID_CLAUDE + "\n    condition: on_failure";
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude" in step)) throw new Error("expected claude step");
+    expect(step.condition).toBe("on_failure");
   });
 });
 

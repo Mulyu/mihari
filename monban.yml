@@ -7,7 +7,13 @@ extends:
 doc:
   link:
     - path: "doc/**/*.md"
-    - path: "*.md"
+      severity: warn
+    - path: "README.md"
+      severity: warn
+    - path: "README.ja.md"
+      severity: warn
+    - path: "CLAUDE.md"
+      severity: warn
 
 git:
   commit:

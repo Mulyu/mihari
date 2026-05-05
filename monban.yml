@@ -1,6 +1,3 @@
-# 共通の security baseline は Mulyu/okite から継承する。
-# baseline の中身: secret / conflict / invisible / injection 検出、GitHub Actions ハードニング、
-#                  npm サプライチェーン対策、MCP 設定検査、.gitignore 対象の誤コミット検出。
 extends:
   - type: github
     repo: Mulyu/okite

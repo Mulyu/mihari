@@ -1,23 +1,25 @@
 # mihari
 
-ローカルのログファイル、または cron スケジュールに反応して bash ランブックを実行する CLI。
+> [日本語](./README.ja.md) | **English**
 
-> mihari (見張り) — ログを見張って、決まった対応を自動で走らせる軽量エンジン。
+A CLI that runs bash runbooks in response to local log files or cron schedules.
 
-## できること
+> mihari (見張り, "watcher") — a lightweight engine that watches your logs and runs predetermined responses automatically.
 
-- ログファイルを定期ポーリング（tail 相当）。新規行が正規表現にマッチでランブック起動
-- cron 式で時刻ベースの定期実行（HTTP 監視は `bash` + `curl` で書く）
-- ランブックは `bash` ステップ
-- ファイル位置 / 発火時刻を `~/.mihari/state/` に保存
+## What it does
 
-## クイックスタート
+- Polls log files periodically (tail-equivalent). When a new line matches a regular expression, the runbook fires.
+- Time-based scheduling via cron expressions (write HTTP checks as `bash` + `curl`).
+- Runbooks are made of `bash` steps.
+- File offsets / firing timestamps are persisted under `~/.mihari/state/`.
+
+## Quick start
 
 ```bash
 npm install
 npm run build
 
-# ランブックを書く
+# Author a runbook
 cat > runbooks/disk-full.yaml <<'YAML'
 id: disk-full-cleanup
 trigger:
@@ -29,29 +31,29 @@ steps:
     bash: /usr/local/bin/cleanup-tmp.sh
 YAML
 
-# 常駐モード
+# Resident mode
 npx mihari daemon
 
-# 1回だけポーリング（cron 向け）
+# One-shot poll (for cron)
 npx mihari poll
 
-# 履歴を見る
+# Inspect history
 npx mihari history
 ```
 
-## ドキュメント
+## Documentation
 
 | | |
 |------------|------|
-| [doc/cli.md](./doc/cli.md) | CLI コマンドリファレンス |
-| [doc/runbook-spec.md](./doc/runbook-spec.md) | ランブック YAML 仕様 |
-| [runbooks/examples/](./runbooks/examples/) | サンプルランブック |
+| [doc/cli.md](./doc/cli.md) | CLI command reference |
+| [doc/runbook-spec.md](./doc/runbook-spec.md) | Runbook YAML specification |
+| [runbooks/examples/](./runbooks/examples/) | Sample runbooks |
 
-開発者向けの設計方針・内部仕様は [CLAUDE.md](./CLAUDE.md)。
+For design philosophy and internal architecture (developer-facing), see [CLAUDE.md](./CLAUDE.md).
 
-## チェック
+## Checks
 
-リポジトリ構造の検証は [monban](https://github.com/Mulyu/monban)。
+Repository structure is validated with [monban](https://github.com/Mulyu/monban).
 
 ```bash
 npx @mulyu/monban all

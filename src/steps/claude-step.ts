@@ -12,7 +12,9 @@ export interface StepContext {
 const TEMPLATE_RE =
   /\{\{\s*(event\.line|event\.path|event\.timestamp|env\.[A-Za-z_][A-Za-z0-9_]*|steps\.[a-z0-9][a-z0-9-]*\.output)\s*\}\}/g;
 
-function substituteTemplate(text: string, ctx: StepContext): string {
+// プロンプト用の直接置換テンプレ展開。bash-step の env 経由展開とは別。
+// claude / claude_agent ステップで共有する。
+export function substituteClaudeTemplate(text: string, ctx: StepContext): string {
   return text.replace(TEMPLATE_RE, (_raw, key: string) => {
     if (key === "event.line") return ctx.event.type === "file" ? ctx.event.content : "";
     if (key === "event.path") return ctx.event.type === "file" ? ctx.event.path : "";
@@ -26,14 +28,14 @@ function substituteTemplate(text: string, ctx: StepContext): string {
   });
 }
 
-function captureOutput(text: string): string {
+export function captureClaudeOutput(text: string): string {
   return text.replace(/\n+$/, "");
 }
 
 export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise<StepResult> {
   const start = Date.now();
-  const prompt = substituteTemplate(step.claude.prompt, ctx);
-  const system = step.claude.system ? substituteTemplate(step.claude.system, ctx) : undefined;
+  const prompt = substituteClaudeTemplate(step.claude.prompt, ctx);
+  const system = step.claude.system ? substituteClaudeTemplate(step.claude.system, ctx) : undefined;
 
   const client = new Anthropic();
   const controller = new AbortController();
@@ -75,7 +77,7 @@ export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise
       duration_ms: Date.now() - start,
       timed_out: false,
       error: ok ? null : `stop_reason: ${response.stop_reason}`,
-      captured: step.capture && ok ? captureOutput(stdout) : null,
+      captured: step.capture && ok ? captureClaudeOutput(stdout) : null,
       skipped: false,
     };
   } catch (err) {

@@ -89,6 +89,80 @@ steps:
 
 stdout / stderr はログと履歴 JSONL に記録される。
 
+### `claude`
+
+```yaml
+- id: analyze-error
+  claude:
+    prompt: |
+      Error: {{ event.line }}
+    system: You are a DevOps expert.   # optional
+    model: claude-opus-4-7             # デフォ claude-opus-4-7
+    max_tokens: 1024                   # デフォ 1024。agent: true の場合は無視
+  timeout_sec: 60
+  on_error: stop
+  capture: true
+```
+
+| フィールド | 内容 |
+|----------|------|
+| `claude.prompt` / `prompt_file` | プロンプト本文 / ファイル（相対パス、起動時読み込み）。どちらか必須 |
+| `claude.system` / `system_file` | システムプロンプト本文 / ファイル（任意） |
+| `claude.model` | モデル名（デフォ `claude-opus-4-7`） |
+| `claude.max_tokens` | 出力トークン上限（単発モードのみ） |
+
+`ANTHROPIC_API_KEY` を環境変数で設定。`stop_reason: max_tokens` は失敗扱い。
+
+### `claude_agent`
+
+Claude Agent SDK でエージェントループを回す独立ステップ種別。`Read` / `Edit` / `Write` / `Bash` などが使え、コード変更・コミット・PR 作成のような副作用を伴う処理に使う。capture される値は最終アシスタントメッセージ。副作用なしの単発質問は `claude:` を使うこと。
+
+```yaml
+- id: fix-and-pr
+  claude_agent:
+    prompt: |
+      An error occurred: {{ event.line }}
+      Investigate, fix it on a new branch, push, and open a PR.
+    system: You are working on the repository at the given cwd.   # optional
+    model: claude-opus-4-7                                          # デフォ
+    allowed_tools:
+      - Read
+      - Edit
+      - Write
+      - "Bash(git status)"
+      - "Bash(git diff:*)"
+      - "Bash(git switch:*)"
+      - "Bash(git add:*)"
+      - "Bash(git commit:*)"
+      - "Bash(git push:*)"
+      - "Bash(gh pr create:*)"
+    permission_mode: strict       # strict（デフォ） | bypass
+    max_turns: 30
+    cwd: /home/user/myrepo
+  timeout_sec: 600
+  on_error: stop
+  capture: true
+```
+
+| フィールド | 内容 |
+|---|---|
+| `claude_agent.prompt` / `prompt_file` | プロンプト本文 / ファイル（相対パス、起動時読み込み）。どちらか必須 |
+| `claude_agent.system` / `system_file` | システムプロンプト本文 / ファイル（任意） |
+| `claude_agent.model` | モデル名（デフォ `claude-opus-4-7`） |
+| `claude_agent.allowed_tools` | **必須**。ツール許可リスト。素のツール名（`Read` 等）と `Bash(<command>:*)` / `Bash(<exact>)` パターン。リスト外は prompt なしで deny。空配列は不可 |
+| `claude_agent.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
+| `claude_agent.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
+| `claude_agent.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
+
+段階制御は `allowed_tools` の中身だけで決まる：
+
+| 範囲 | 追加するエントリ |
+|---|---|
+| 編集のみ | `Read` `Edit` `Write` |
+| + ローカルコミット | + `Bash(git status)` `Bash(git diff:*)` `Bash(git switch:*)` `Bash(git add:*)` `Bash(git commit:*)` |
+| + push | + `Bash(git push:*)` |
+| + PR | + `Bash(gh pr create:*)` |
+
 ## 変数
 
 `{{ ... }}` でテンプレ展開。実体は環境変数経由で渡されるため、ログ行に注入文字列が混ざっても安全。
@@ -125,3 +199,4 @@ mihari validate runbooks/                # ディレクトリ指定で全件
 - `api-health.yaml` — HTTP ヘルスチェック（cron + curl）
 - `backup-freshness.yaml` — バックアップ鮮度チェック（cron）
 - `k8s-pod-restart-summary.yaml` — Pod restart 数の定期集計（cron + capture）
+- `error-fix-pr.yaml` — Claude にバグ修正・push・PR 作成までやらせる（file + claude agent ステップ）

@@ -1,6 +1,6 @@
 export type Trigger = FileTrigger | CronTrigger;
 
-export type Step = BashStep | ClaudeStep;
+export type Step = BashStep | ClaudeStep | ClaudeAgentStep;
 
 export interface Runbook {
   id: string;
@@ -33,6 +33,7 @@ export interface BashStep {
   condition?: "always" | "on_success" | "on_failure";
 }
 
+// 単発の messages.create 呼び出し。副作用なし。テキストを返すだけ。
 export interface ClaudeStep {
   id: string;
   claude: {
@@ -40,6 +41,29 @@ export interface ClaudeStep {
     system?: string;
     model: string;
     max_tokens: number;
+  };
+  timeout_sec: number;
+  on_error: "stop" | "continue";
+  capture: boolean;
+  condition?: "always" | "on_success" | "on_failure";
+}
+
+// Claude Agent SDK 経由のエージェントループ。ファイル編集 / Bash 等の副作用を伴う。
+export interface ClaudeAgentStep {
+  id: string;
+  claude_agent: {
+    prompt: string;
+    system?: string;
+    model: string;
+    // SDK の allowedTools にそのまま渡す（"Read", "Bash(git push:*)" など）。
+    allowed_tools: string[];
+    // SDK の maxTurns に対応（省略時は SDK 既定）。
+    max_turns?: number;
+    // "strict" は allowed_tools に無い tool 呼び出しを全て deny。
+    // "bypass" は全ツールを許可（allowDangerouslySkipPermissions = true）。
+    permission_mode: "strict" | "bypass";
+    // 絶対パス。省略時は process.cwd()。
+    cwd?: string;
   };
   timeout_sec: number;
   on_error: "stop" | "continue";

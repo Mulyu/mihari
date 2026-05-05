@@ -12,7 +12,7 @@ doc:
 git:
   commit:
     message:
-      subject_max_length: 72
+      subject_max_length: 80
       severity: warn
   diff:
     size:
@@ -27,7 +27,7 @@ git:
   branch_name:
     pattern: "^(main|claude/[A-Za-z0-9-]+)$"
     allowed: ["main"]
-    severity: warn
+    severity: error
 
 agent:
   instructions:
@@ -36,7 +36,9 @@ agent:
         - "プロジェクト概要"
         - "設計原則"
         - "ディレクトリ構造"
+        - "データフロー"
+        - "失敗モードと対応"
         - "主要ライブラリ"
         - "コーディング規約"
         - "やらないこと（Non-Goals）"
-      severity: warn
+      severity: error

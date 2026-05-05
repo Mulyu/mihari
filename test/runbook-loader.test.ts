@@ -340,8 +340,24 @@ steps:
     expect(step.condition).toBe("on_failure");
   });
 
-  it("loads claude agent step with allowed_tools and permission_mode", () => {
-    const yaml = `
+  it("rejects agent-only fields on a claude step", () => {
+    for (const extra of [
+      "      agent: true",
+      "      allowed_tools: [Read]",
+      "      max_turns: 5",
+      "      permission_mode: bypass",
+      "      cwd: /tmp",
+    ]) {
+      const yaml = VALID_CLAUDE + "\n" + extra;
+      const f = join(dir, "rb.yaml");
+      writeFileSync(f, yaml);
+      expect(() => loadRunbookFile(f)).toThrow(/only valid on a "claude_agent" step/);
+    }
+  });
+});
+
+describe("claude_agent steps", () => {
+  const VALID_AGENT = `
 id: agent-fix
 trigger:
   source: file
@@ -349,9 +365,8 @@ trigger:
   pattern: "ERROR"
 steps:
   - id: fix
-    claude:
+    claude_agent:
       prompt: "Fix: {{ event.line }}"
-      agent: true
       allowed_tools:
         - Read
         - Edit
@@ -362,66 +377,92 @@ steps:
       max_turns: 15
       cwd: /home/user/repo
 `.trim();
+
+  it("loads a valid claude_agent step", () => {
     const f = join(dir, "rb.yaml");
-    writeFileSync(f, yaml);
+    writeFileSync(f, VALID_AGENT);
     const rb = loadRunbookFile(f);
     const step = rb.steps[0];
-    if (!step || !("claude" in step)) throw new Error("expected claude step");
-    expect(step.claude.agent).toBe(true);
-    expect(step.claude.allowed_tools).toEqual([
+    if (!step || !("claude_agent" in step)) throw new Error("expected claude_agent step");
+    expect(step.claude_agent.allowed_tools).toEqual([
       "Read",
       "Edit",
       "Write",
       "Bash(git status)",
       "Bash(git push:*)",
     ]);
-    expect(step.claude.permission_mode).toBe("strict");
-    expect(step.claude.max_turns).toBe(15);
-    expect(step.claude.cwd).toBe("/home/user/repo");
+    expect(step.claude_agent.permission_mode).toBe("strict");
+    expect(step.claude_agent.max_turns).toBe(15);
+    expect(step.claude_agent.cwd).toBe("/home/user/repo");
+    expect(step.claude_agent.model).toBe("claude-opus-4-7");
   });
 
-  it("rejects allowed_tools without agent: true", () => {
-    const yaml = VALID_CLAUDE + "\n      allowed_tools: [Read]";
+  it("defaults permission_mode to strict", () => {
+    const yaml = VALID_AGENT.replace("      permission_mode: strict\n", "");
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
-    expect(() => loadRunbookFile(f)).toThrow(/requires agent: true/);
+    const rb = loadRunbookFile(f);
+    const step = rb.steps[0];
+    if (!step || !("claude_agent" in step)) throw new Error("expected claude_agent step");
+    expect(step.claude_agent.permission_mode).toBe("strict");
   });
 
-  it("rejects max_turns without agent: true", () => {
-    const yaml = VALID_CLAUDE + "\n      max_turns: 5";
+  it("requires allowed_tools", () => {
+    const yaml = `
+id: agent-fix
+trigger:
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR"
+steps:
+  - id: fix
+    claude_agent:
+      prompt: "fix"
+`.trim();
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
-    expect(() => loadRunbookFile(f)).toThrow(/requires agent: true/);
+    expect(() => loadRunbookFile(f)).toThrow(/allowed_tools is required/);
   });
 
-  it("rejects permission_mode without agent: true", () => {
-    const yaml = VALID_CLAUDE + "\n      permission_mode: bypass";
+  it("rejects empty allowed_tools", () => {
+    const yaml = VALID_AGENT.replace(
+      /      allowed_tools:[\s\S]*?      permission_mode/,
+      "      allowed_tools: []\n      permission_mode",
+    );
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
-    expect(() => loadRunbookFile(f)).toThrow(/requires agent: true/);
+    expect(() => loadRunbookFile(f)).toThrow(/at least one tool/);
   });
 
   it("rejects relative cwd", () => {
-    const yaml =
-      VALID_CLAUDE + "\n      agent: true\n      cwd: ./relative";
+    const yaml = VALID_AGENT.replace("/home/user/repo", "./relative");
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
     expect(() => loadRunbookFile(f)).toThrow(/cwd must be an absolute path/);
   });
 
   it("rejects unknown permission_mode", () => {
-    const yaml =
-      VALID_CLAUDE + "\n      agent: true\n      permission_mode: ask";
+    const yaml = VALID_AGENT.replace("permission_mode: strict", "permission_mode: ask");
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
     expect(() => loadRunbookFile(f)).toThrow(/permission_mode must be/);
   });
 
-  it("rejects allowed_tools with non-string entries", () => {
-    const yaml = VALID_CLAUDE + "\n      agent: true\n      allowed_tools: [Read, 7]";
+  it("rejects non-string allowed_tools entries", () => {
+    const yaml = VALID_AGENT.replace(
+      /      allowed_tools:[\s\S]*?      permission_mode/,
+      "      allowed_tools: [Read, 7]\n      permission_mode",
+    );
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
     expect(() => loadRunbookFile(f)).toThrow(/allowed_tools\[1\] must be a non-empty string/);
+  });
+
+  it("rejects non-positive max_turns", () => {
+    const yaml = VALID_AGENT.replace("max_turns: 15", "max_turns: 0");
+    const f = join(dir, "rb.yaml");
+    writeFileSync(f, yaml);
+    expect(() => loadRunbookFile(f)).toThrow(/max_turns must be > 0/);
   });
 });
 

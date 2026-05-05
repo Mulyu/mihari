@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { logger } from "./logger.js";
 import { runBashStep } from "../steps/bash-step.js";
 import { runClaudeStep } from "../steps/claude-step.js";
+import { runClaudeAgentStep } from "../steps/claude-agent-step.js";
 import type { Runbook, RunResult, Step, StepResult, TriggerEvent } from "../types.js";
 import type { StateStore } from "./state.js";
 
@@ -114,6 +115,7 @@ function runStep(
   step: Step,
   ctx: { event: TriggerEvent; capturedSteps: Record<string, string> },
 ): Promise<StepResult> {
+  if ("claude_agent" in step) return runClaudeAgentStep(step, ctx);
   if ("claude" in step) return runClaudeStep(step, ctx);
   return runBashStep(step, ctx);
 }

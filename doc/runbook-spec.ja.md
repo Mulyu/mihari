@@ -113,17 +113,18 @@ stdout / stderr はログと履歴 JSONL に記録される。
 
 `ANTHROPIC_API_KEY` を環境変数で設定。`stop_reason: max_tokens` は失敗扱い。
 
-#### Agent モード
+### `claude_agent`
 
-`claude.agent: true` で Claude Agent SDK 経由に切り替わり、`Read` / `Edit` / `Write` / `Bash` ツールが使える。コード変更・コミット・PR 作成に使う。capture される値は最終アシスタントメッセージ。
+Claude Agent SDK でエージェントループを回す独立ステップ種別。`Read` / `Edit` / `Write` / `Bash` などが使え、コード変更・コミット・PR 作成のような副作用を伴う処理に使う。capture される値は最終アシスタントメッセージ。副作用なしの単発質問は `claude:` を使うこと。
 
 ```yaml
 - id: fix-and-pr
-  claude:
+  claude_agent:
     prompt: |
       An error occurred: {{ event.line }}
       Investigate, fix it on a new branch, push, and open a PR.
-    agent: true
+    system: You are working on the repository at the given cwd.   # optional
+    model: claude-opus-4-7                                          # デフォ
     allowed_tools:
       - Read
       - Edit
@@ -135,19 +136,23 @@ stdout / stderr はログと履歴 JSONL に記録される。
       - "Bash(git commit:*)"
       - "Bash(git push:*)"
       - "Bash(gh pr create:*)"
-    permission_mode: strict
+    permission_mode: strict       # strict（デフォ） | bypass
     max_turns: 30
     cwd: /home/user/myrepo
   timeout_sec: 600
+  on_error: stop
+  capture: true
 ```
 
 | フィールド | 内容 |
 |---|---|
-| `claude.agent` | `true` で agent モード（デフォ `false`） |
-| `claude.allowed_tools` | ツール許可リスト。素のツール名（`Read` 等）と `Bash(<command>:*)` / `Bash(<exact>)` パターン。リスト外は prompt なしで deny |
-| `claude.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
-| `claude.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
-| `claude.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
+| `claude_agent.prompt` / `prompt_file` | プロンプト本文 / ファイル（相対パス、起動時読み込み）。どちらか必須 |
+| `claude_agent.system` / `system_file` | システムプロンプト本文 / ファイル（任意） |
+| `claude_agent.model` | モデル名（デフォ `claude-opus-4-7`） |
+| `claude_agent.allowed_tools` | **必須**。ツール許可リスト。素のツール名（`Read` 等）と `Bash(<command>:*)` / `Bash(<exact>)` パターン。リスト外は prompt なしで deny。空配列は不可 |
+| `claude_agent.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
+| `claude_agent.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
+| `claude_agent.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
 
 段階制御は `allowed_tools` の中身だけで決まる：
 
@@ -157,8 +162,6 @@ stdout / stderr はログと履歴 JSONL に記録される。
 | + ローカルコミット | + `Bash(git status)` `Bash(git diff:*)` `Bash(git switch:*)` `Bash(git add:*)` `Bash(git commit:*)` |
 | + push | + `Bash(git push:*)` |
 | + PR | + `Bash(gh pr create:*)` |
-
-`agent` 専用フィールド（`allowed_tools` / `permission_mode` / `max_turns` / `cwd`）は `agent: true` 未指定時に書くと弾かれる。
 
 ## 変数
 

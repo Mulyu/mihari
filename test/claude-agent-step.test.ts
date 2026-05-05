@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesAllowedTools } from "../src/steps/claude-step.js";
+import { matchesAllowedTools } from "../src/steps/claude-agent-step.js";
 
 describe("matchesAllowedTools", () => {
   it("matches plain tool names", () => {

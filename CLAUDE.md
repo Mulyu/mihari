@@ -8,7 +8,7 @@
 
 - `file` トリガー: ログファイルを tail し、新規行が正規表現にマッチで発火
 - `cron` トリガー: 5フィールド cron 式で定期発火
-- ステップは `bash` と `claude`（単発 / agent モード）をサポート
+- ステップは `bash` / `claude`（単発）/ `claude_agent`（副作用あり、Agent SDK）の3種別
 - state は `~/.mihari/state/` にローカル保存
 
 ## 設計原則
@@ -40,7 +40,8 @@ mihari/
 │   │   └── state.ts            # ~/.mihari/state I/O
 │   ├── steps/
 │   │   ├── bash-step.ts        # spawn bash + テンプレ展開（注入安全）
-│   │   └── claude-step.ts      # 単発: @anthropic-ai/sdk / agent: @anthropic-ai/claude-agent-sdk
+│   │   ├── claude-step.ts      # 単発の messages.create。副作用なし。テンプレ展開ヘルパもここから export
+│   │   └── claude-agent-step.ts # @anthropic-ai/claude-agent-sdk による agent ループ。副作用あり
 │   ├── pollers/
 │   │   ├── file.ts             # tail（offset/inode/size 判定）
 │   │   └── cron.ts             # croner で発火判定

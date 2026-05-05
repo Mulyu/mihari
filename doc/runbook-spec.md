@@ -143,17 +143,18 @@ bash: |
 
 Template variables (`{{ event.line }}` etc.) are expanded via direct string substitution at runtime. `ANTHROPIC_API_KEY` must be set in the environment. A `stop_reason: max_tokens` response is treated as a step failure.
 
-#### Agent mode
+### `claude_agent`
 
-Setting `claude.agent: true` switches the step to the Claude Agent SDK, giving the model file edit tools (`Read`, `Edit`, `Write`) and `Bash`. Use this for code changes, commits, and PR creation. The captured output is the agent's final assistant message.
+A separate step type that runs the Claude Agent SDK with file edit tools (`Read`, `Edit`, `Write`) and `Bash`. Use this for code changes, commits, and PR creation. The captured output is the agent's final assistant message. Single-shot prompting belongs in `claude:`; this step is for runs with side effects.
 
 ```yaml
 - id: fix-and-pr
-  claude:
+  claude_agent:
     prompt: |
       An error occurred: {{ event.line }}
       Investigate, fix it on a new branch, push, and open a PR.
-    agent: true
+    system: You are working on the repository at the given cwd.   # optional
+    model: claude-opus-4-7                                          # default
     allowed_tools:
       - Read
       - Edit
@@ -165,19 +166,23 @@ Setting `claude.agent: true` switches the step to the Claude Agent SDK, giving t
       - "Bash(git commit:*)"
       - "Bash(git push:*)"
       - "Bash(gh pr create:*)"
-    permission_mode: strict
+    permission_mode: strict       # strict (default) | bypass
     max_turns: 30
     cwd: /home/user/myrepo
   timeout_sec: 600
+  on_error: stop
+  capture: true
 ```
 
 | Field | Purpose |
 |----------|------|
-| `claude.agent` | `true` enables agent mode (default `false`) |
-| `claude.allowed_tools` | Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. |
-| `claude.permission_mode` | `strict` (default; every tool call goes through `canUseTool` and is denied unless it matches `allowed_tools`) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
-| `claude.max_turns` | Maximum agentic turns before the SDK stops (no default — SDK default applies) |
-| `claude.cwd` | Absolute path the agent operates in. Defaults to the directory mihari was started in. |
+| `claude_agent.prompt` / `prompt_file` | Prompt text or file (mutually exclusive; one is required) |
+| `claude_agent.system` / `system_file` | System prompt text or file (optional; mutually exclusive) |
+| `claude_agent.model` | Model to use (default `claude-opus-4-7`) |
+| `claude_agent.allowed_tools` | **Required.** Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. Must be non-empty. |
+| `claude_agent.permission_mode` | `strict` (default; every tool call goes through `canUseTool` and is denied unless it matches `allowed_tools`) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
+| `claude_agent.max_turns` | Maximum agentic turns before the SDK stops (no default — SDK default applies) |
+| `claude_agent.cwd` | Absolute path the agent operates in. Defaults to the directory mihari was started in. |
 
 Stage control is purely a function of `allowed_tools`:
 
@@ -187,8 +192,6 @@ Stage control is purely a function of `allowed_tools`:
 | + local commit | + `Bash(git status)` `Bash(git diff:*)` `Bash(git switch:*)` `Bash(git add:*)` `Bash(git commit:*)` |
 | + push | + `Bash(git push:*)` |
 | + PR | + `Bash(gh pr create:*)` |
-
-`agent`-only fields (`allowed_tools`, `permission_mode`, `max_turns`, `cwd`) are rejected when `agent` is unset/false.
 
 ## Validation
 

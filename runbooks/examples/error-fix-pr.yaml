@@ -12,8 +12,7 @@ steps:
     capture: true
 
   - id: fix-and-pr
-    claude:
-      agent: true
+    claude_agent:
       model: claude-opus-4-7
       system: |
         You are a senior engineer working on the repository at the given cwd.

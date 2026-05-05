@@ -7,13 +7,100 @@ extends:
 doc:
   link:
     - path: "doc/**/*.md"
-      severity: warn
     - path: "README.md"
-      severity: warn
     - path: "README.ja.md"
-      severity: warn
     - path: "CLAUDE.md"
-      severity: warn
+
+# 今回のリファクタで確立した src/ レイアウトを構造リンタで固定する。
+# 6 つのトップレベルディレクトリ（engine/ lib/ loader/ state/ steps/ triggers/）
+# 以外を src/ 直下に作らない。新規追加が必要なら direction を更新してから入れる。
+path:
+  required:
+    # ルートのメタデータ。揃っていないとリポジトリとして崩れている。
+    - path: "."
+      files:
+        - "LICENSE"
+        - "README.md"
+        - "README.ja.md"
+        - "CLAUDE.md"
+        - "package.json"
+        - "tsconfig.json"
+        - "monban.yml"
+    # src/ 直下に直接置く 2 ファイルと 6 ディレクトリ。
+    - path: "src"
+      files:
+        - "cli.ts"
+        - "types.ts"
+        - "engine/"
+        - "lib/"
+        - "loader/"
+        - "state/"
+        - "steps/"
+        - "triggers/"
+    # ユーザー向けドキュメントの日英ペア。
+    - path: "doc"
+      files:
+        - "cli.md"
+        - "cli.ja.md"
+        - "runbook-spec.md"
+        - "runbook-spec.ja.md"
+
+  forbidden:
+    # 旧構造への先祖返りを止める（PR #21 で恒久削除）。
+    - path: "src/core/**"
+      message: "src/core/ は engine/ lib/ loader/ state/ に分割されました。元に戻さない"
+    - path: "src/pollers/**"
+      message: "src/pollers/ は src/triggers/ にリネームされました（YAML の trigger.source と語彙を一致させる）"
+
+    # direction: 「リポジトリ内に decisions ログは持たない」
+    - path: "decisions.md"
+      message: "decisions ログはリポジトリに置かない。判断は PR 説明と git log に残す"
+    - path: "DECISIONS.md"
+      message: "decisions ログはリポジトリに置かない。判断は PR 説明と git log に残す"
+    - path: "doc/decisions/**"
+      message: "decisions ログはリポジトリに置かない。判断は PR 説明と git log に残す"
+
+    # src/ 直下のディレクトリと .ts ファイルを許可リスト方式で固定。
+    - path: "src/!(engine|lib|loader|state|steps|triggers)/"
+      type: directory
+      message: "src/ 直下のディレクトリは engine/ lib/ loader/ state/ steps/ triggers/ のみ。新設は CLAUDE.md とこの allowlist の更新が前提"
+    - path: "src/!(cli|types).ts"
+      type: file
+      message: "src/ 直下の .ts は cli.ts と types.ts のみ。それ以外は engine/ lib/ ... 配下に置く"
+
+    # コーディングエージェントが作りがちな曖昧ディレクトリを禁止。
+    - path: "src/**/utils/**"
+      message: "utils/ は禁止。意味のあるモジュール名に分類する"
+    - path: "src/**/helpers/**"
+      message: "helpers/ は禁止。意味のあるモジュール名に分類する"
+    - path: "src/**/common/**"
+      message: "common/ は禁止。意味のあるモジュール名に分類する"
+
+    # src/ は TypeScript のみ（npm run build の出力 dist/ は .gitignore 済み）。
+    - path: "src/**/*.js"
+      message: "src/ は .ts のみ"
+    - path: "src/**/*.jsx"
+      message: "src/ は .ts のみ"
+
+  naming:
+    # 全ソースファイル・ディレクトリ名を kebab-case で統一（YAML 側の id 規約と揃える）。
+    - path: "src/**/*.ts"
+      style: kebab
+    - path: "src/**/"
+      target: directory
+      style: kebab
+
+  depth:
+    # 今回の最深は src/loader/step-bash.ts で深さ 2。3 を上限にして余裕 1 だけ持たせる。
+    # これ以上ネストしたくなったら大抵モジュール分割の合図。
+    - path: "src"
+      max: 3
+
+  count:
+    # examples は「bash で書けるなら新機能ではなくサンプルで提示する」ための受け皿。
+    # 0 になっていたらそもそも direction の運用が崩れている合図。
+    - path: "runbooks/examples"
+      min: 1
 
 git:
   commit:

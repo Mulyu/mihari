@@ -11,7 +11,7 @@ id: kebab-case-id          # 必須。`[a-z0-9][a-z0-9-]*`
 description: ...           # 任意
 enabled: true              # 任意。false にすると daemon/poll で発火しない（デフォルト true）
 cooldown_sec: 300          # 任意。前回発火から指定秒以内は再発火しない
-trigger: ...               # 必須。file / cron / cloudwatch_logs のいずれか
+trigger: ...               # 必須。file / cron / aws_cloudwatch_logs のいずれか
 steps: [ ... ]             # 必須。1件以上
 ```
 
@@ -47,11 +47,11 @@ trigger:
 
 初回観測では発火せず、次のスロットを待つ。手動テストは `mihari run <id>`。1ティックで複数スロットが過ぎていても発火は1回（catch-up しない）。
 
-### `cloudwatch_logs`
+### `aws_cloudwatch_logs`
 
 ```yaml
 trigger:
-  source: cloudwatch_logs
+  source: aws_cloudwatch_logs
   region: us-east-1
   log_group: /aws/lambda/myfunc
   pattern: "ERROR"             # 任意。message に対する正規表現
@@ -67,9 +67,9 @@ trigger:
 
 セマンティクスは `file` トリガーと対称。マッチした event 1 件ごとに 1 回発火し、初回観測では履歴を遡らない（cursor は「今」からシード）。
 
-cursor は `~/.mihari/state/cloudwatch-logs/<sha1(region|log_group)>.json` に保存。書き込み失敗は fail-open（warn ログのみで処理続行）。
+cursor は `~/.mihari/state/aws-cloudwatch-logs/<sha1(region|log_group)>.json` に保存。書き込み失敗は fail-open（warn ログのみで処理続行）。
 
-認証は AWS SDK 標準チェーン（環境変数 / `~/.aws/credentials` / IAM ロール）に完全委譲。mihari は認証フィールドを一切公開しない。SDK は `cloudwatch_logs` トリガーが 1 つでも存在するときだけ動的 import される。
+認証は AWS SDK 標準チェーン（環境変数 / `~/.aws/credentials` / IAM ロール）に完全委譲。mihari は認証フィールドを一切公開しない。SDK は `aws_cloudwatch_logs` トリガーが 1 つでも存在するときだけ動的 import される。
 
 同じ `(region, log_group)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され、`interval_sec` は購読側の最小値が採用される。
 
@@ -202,7 +202,7 @@ preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を agent に�
 
 `{{ ... }}` でテンプレ展開。実体は環境変数経由で渡されるため、ログ行に注入文字列が混ざっても安全。
 
-| 変数 | `file` | `cron` | `cloudwatch_logs` |
+| 変数 | `file` | `cron` | `aws_cloudwatch_logs` |
 |------|--------|--------|---|
 | `{{ event.line }}` | マッチした行 | 空文字 | event の message |
 | `{{ event.path }}` | ログファイルパス | 空文字 | log group 名 |
@@ -244,4 +244,4 @@ mihari validate runbooks/                # ディレクトリ指定で全件
 - `backup-freshness.yaml` — バックアップ鮮度チェック（cron）
 - `k8s-pod-restart-summary.yaml` — Pod restart 数の定期集計（cron + capture）
 - `error-fix-pr.yaml` — Claude にバグ修正・push・PR 作成までやらせる（file + claude agent ステップ）
-- `cloudwatch-logs-error-alert.yaml` — CloudWatch Logs の ERROR を 1 件ごとに通知（cloudwatch_logs）
+- `aws-cloudwatch-logs-error-alert.yaml` — CloudWatch Logs の ERROR を 1 件ごとに通知（aws_cloudwatch_logs）

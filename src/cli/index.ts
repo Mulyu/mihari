@@ -16,10 +16,10 @@ import { tick } from "../engine/dispatcher.js";
 import { FilePoller } from "../triggers/file.js";
 import { CronScheduler, cronRunbooks } from "../triggers/cron.js";
 import {
-  CloudWatchLogsPoller,
-  createCloudWatchLogsApiFactory,
-  uniqueCloudWatchLogsTriggers,
-} from "../triggers/cloudwatch-logs.js";
+  AwsCloudWatchLogsPoller,
+  createAwsCloudWatchLogsApiFactory,
+  uniqueAwsCloudWatchLogsTriggers,
+} from "../triggers/aws-cloudwatch-logs.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -224,13 +224,13 @@ interface Ctx {
   executor: Executor;
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
-  cloudWatchLogsPollers: CloudWatchLogsPoller[];
+  awsCloudWatchLogsPollers: AwsCloudWatchLogsPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
   if (t.source === "file") return `file:${t.path}`;
   if (t.source === "cron") return `cron:${t.schedule}`;
-  return `cloudwatch_logs:${t.region}/${t.log_group}`;
+  return `aws_cloudwatch_logs:${t.region}/${t.log_group}`;
 }
 
 async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
@@ -254,13 +254,13 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
   const pollers = uniqueTriggerPaths(runbooks).map((p) => new FilePoller(p, state));
   const cronSchedulers = cronRunbooks(runbooks).map((rb) => new CronScheduler(rb, state));
 
-  const cwGroups = uniqueCloudWatchLogsTriggers(runbooks);
-  const cloudWatchLogsPollers: CloudWatchLogsPoller[] = [];
+  const cwGroups = uniqueAwsCloudWatchLogsTriggers(runbooks);
+  const awsCloudWatchLogsPollers: AwsCloudWatchLogsPoller[] = [];
   if (cwGroups.length > 0) {
-    const factory = await createCloudWatchLogsApiFactory();
+    const factory = await createAwsCloudWatchLogsApiFactory();
     for (const g of cwGroups) {
-      cloudWatchLogsPollers.push(
-        new CloudWatchLogsPoller(
+      awsCloudWatchLogsPollers.push(
+        new AwsCloudWatchLogsPoller(
           { region: g.region, logGroup: g.logGroup },
           g.intervalSec,
           state,
@@ -270,7 +270,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
-  return { runbooks, state, executor, pollers, cronSchedulers, cloudWatchLogsPollers };
+  return { runbooks, state, executor, pollers, cronSchedulers, awsCloudWatchLogsPollers };
 }
 
 function sleep(ms: number): Promise<void> {

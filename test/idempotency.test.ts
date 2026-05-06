@@ -68,9 +68,9 @@ describe("computeIdempotencyKey", () => {
     expect(computeIdempotencyKey("rb", a)).not.toBe(computeIdempotencyKey("rb", b));
   });
 
-  it("cloudwatch_logs events keyed on event_id (timestamps ignored)", () => {
+  it("aws_cloudwatch_logs events keyed on event_id (timestamps ignored)", () => {
     const a: TriggerEvent = {
-      type: "cloudwatch_logs",
+      type: "aws_cloudwatch_logs",
       region: "us-east-1",
       log_group: "/g",
       log_stream: "s",
@@ -83,9 +83,9 @@ describe("computeIdempotencyKey", () => {
     expect(computeIdempotencyKey("rb", a)).toBe(computeIdempotencyKey("rb", b));
   });
 
-  it("cloudwatch_logs events with different event_id get different keys", () => {
+  it("aws_cloudwatch_logs events with different event_id get different keys", () => {
     const a: TriggerEvent = {
-      type: "cloudwatch_logs",
+      type: "aws_cloudwatch_logs",
       region: "us-east-1",
       log_group: "/g",
       log_stream: "s",

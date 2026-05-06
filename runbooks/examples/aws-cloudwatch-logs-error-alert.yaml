@@ -4,7 +4,7 @@ description: CloudWatch Logs の Lambda ERROR ログ 1 件ごとに 1 回通知�
 # AWS 認証は SDK 標準チェーン（環境変数 / ~/.aws/credentials / IAM ロール）に委譲。
 # region と log_group は明示必須（state key の同一性を担保するため）。
 trigger:
-  source: cloudwatch_logs
+  source: aws_cloudwatch_logs
   region: us-east-1
   log_group: /aws/lambda/myfunc
   pattern: "ERROR"

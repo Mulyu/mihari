@@ -17,7 +17,7 @@ afterEach(() => {
 const VALID = `
 id: cw-error
 trigger:
-  source: cloudwatch_logs
+  source: aws_cloudwatch_logs
   region: us-east-1
   log_group: /aws/lambda/myfunc
   pattern: "ERROR"
@@ -27,13 +27,13 @@ steps:
     bash: echo hi
 `.trim();
 
-describe("cloudwatch_logs trigger loader", () => {
+describe("aws_cloudwatch_logs trigger loader", () => {
   it("loads a valid trigger", () => {
     const f = join(dir, "rb.yaml");
     writeFileSync(f, VALID);
     const rb = loadRunbookFile(f);
-    expect(rb.trigger.source).toBe("cloudwatch_logs");
-    if (rb.trigger.source !== "cloudwatch_logs") throw new Error("type narrow");
+    expect(rb.trigger.source).toBe("aws_cloudwatch_logs");
+    if (rb.trigger.source !== "aws_cloudwatch_logs") throw new Error("type narrow");
     expect(rb.trigger.region).toBe("us-east-1");
     expect(rb.trigger.log_group).toBe("/aws/lambda/myfunc");
     expect(rb.trigger.interval_sec).toBe(60);
@@ -46,7 +46,7 @@ describe("cloudwatch_logs trigger loader", () => {
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
     const rb = loadRunbookFile(f);
-    if (rb.trigger.source !== "cloudwatch_logs") throw new Error("type narrow");
+    if (rb.trigger.source !== "aws_cloudwatch_logs") throw new Error("type narrow");
     expect(rb.trigger.pattern).toBeUndefined();
   });
 

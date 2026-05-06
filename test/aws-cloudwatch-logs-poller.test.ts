@@ -1,22 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  CloudWatchLogsPoller,
+  AwsCloudWatchLogsPoller,
   computeNextState,
   decidePoll,
-  uniqueCloudWatchLogsTriggers,
-  type CloudWatchLogsApi,
+  uniqueAwsCloudWatchLogsTriggers,
+  type AwsCloudWatchLogsApi,
   type FilterLogEventsInput,
   type FilterLogEventsOutput,
-} from "../src/triggers/cloudwatch-logs.js";
+} from "../src/triggers/aws-cloudwatch-logs.js";
 import type {
-  CloudWatchLogsPollerState,
+  AwsCloudWatchLogsPollerState,
   Runbook,
 } from "../src/types/index.js";
 import type { StateStore } from "../src/state/store.js";
 
 function fakeApi(
   responses: FilterLogEventsOutput[],
-): CloudWatchLogsApi & { calls: FilterLogEventsInput[] } {
+): AwsCloudWatchLogsApi & { calls: FilterLogEventsInput[] } {
   const calls: FilterLogEventsInput[] = [];
   let i = 0;
   return {
@@ -30,19 +30,19 @@ function fakeApi(
   };
 }
 
-function fakeState(initial: CloudWatchLogsPollerState | null = null): StateStore & {
-  saved: CloudWatchLogsPollerState[];
+function fakeState(initial: AwsCloudWatchLogsPollerState | null = null): StateStore & {
+  saved: AwsCloudWatchLogsPollerState[];
 } {
   let cur = initial;
-  const saved: CloudWatchLogsPollerState[] = [];
+  const saved: AwsCloudWatchLogsPollerState[] = [];
   return {
     saved,
-    loadCloudWatchLogsState: vi.fn(() => cur),
-    saveCloudWatchLogsState: vi.fn(async (s: CloudWatchLogsPollerState) => {
+    loadAwsCloudWatchLogsState: vi.fn(() => cur),
+    saveAwsCloudWatchLogsState: vi.fn(async (s: AwsCloudWatchLogsPollerState) => {
       cur = s;
       saved.push(s);
     }),
-  } as unknown as StateStore & { saved: CloudWatchLogsPollerState[] };
+  } as unknown as StateStore & { saved: AwsCloudWatchLogsPollerState[] };
 }
 
 const KEY = { region: "us-east-1", logGroup: "/aws/lambda/x" };
@@ -58,7 +58,7 @@ describe("decidePoll", () => {
 
   it("skips when interval has not elapsed yet", () => {
     const now = new Date("2026-05-06T12:00:30Z");
-    const prev: CloudWatchLogsPollerState = {
+    const prev: AwsCloudWatchLogsPollerState = {
       region: "us-east-1",
       log_group: "/aws/lambda/x",
       last_event_timestamp_ms: 100,
@@ -73,7 +73,7 @@ describe("decidePoll", () => {
 
   it("polls when interval has elapsed (start at last_event_timestamp_ms inclusive)", () => {
     const now = new Date("2026-05-06T12:01:00Z");
-    const prev: CloudWatchLogsPollerState = {
+    const prev: AwsCloudWatchLogsPollerState = {
       region: "us-east-1",
       log_group: "/aws/lambda/x",
       last_event_timestamp_ms: 1234,
@@ -89,7 +89,7 @@ describe("decidePoll", () => {
 
 describe("computeNextState", () => {
   it("when max timestamp advances, last_event_ids resets to ids at new max", () => {
-    const prev: CloudWatchLogsPollerState = {
+    const prev: AwsCloudWatchLogsPollerState = {
       region: "us-east-1",
       log_group: "/aws/lambda/x",
       last_event_timestamp_ms: 100,
@@ -109,7 +109,7 @@ describe("computeNextState", () => {
   });
 
   it("when no new events seen, retains prev cursor and ids and updates last_polled_at", () => {
-    const prev: CloudWatchLogsPollerState = {
+    const prev: AwsCloudWatchLogsPollerState = {
       region: "us-east-1",
       log_group: "/aws/lambda/x",
       last_event_timestamp_ms: 100,
@@ -124,7 +124,7 @@ describe("computeNextState", () => {
   });
 
   it("when new events all sit on the same boundary as prev max, ids merge with prev", () => {
-    const prev: CloudWatchLogsPollerState = {
+    const prev: AwsCloudWatchLogsPollerState = {
       region: "us-east-1",
       log_group: "/aws/lambda/x",
       last_event_timestamp_ms: 100,
@@ -142,11 +142,11 @@ describe("computeNextState", () => {
   });
 });
 
-describe("CloudWatchLogsPoller.tick", () => {
+describe("AwsCloudWatchLogsPoller.tick", () => {
   it("first tick seeds cursor and does not call API", async () => {
     const state = fakeState(null);
     const api = fakeApi([]);
-    const poller = new CloudWatchLogsPoller(KEY, 60, state, api);
+    const poller = new AwsCloudWatchLogsPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-06T12:00:00Z"));
     expect(events).toEqual([]);
     expect(api.calls).toHaveLength(0);
@@ -166,14 +166,14 @@ describe("CloudWatchLogsPoller.tick", () => {
       last_polled_at: "2026-05-06T12:00:00Z",
     });
     const api = fakeApi([]);
-    const poller = new CloudWatchLogsPoller(KEY, 60, state, api);
+    const poller = new AwsCloudWatchLogsPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-06T12:00:30Z"));
     expect(events).toEqual([]);
     expect(api.calls).toHaveLength(0);
     expect(state.saved).toHaveLength(0);
   });
 
-  it("returns events as CloudWatchLogsEvent objects after interval elapses", async () => {
+  it("returns events as AwsCloudWatchLogsEvent objects after interval elapses", async () => {
     const state = fakeState({
       region: "us-east-1",
       log_group: "/aws/lambda/x",
@@ -199,11 +199,11 @@ describe("CloudWatchLogsPoller.tick", () => {
         ],
       },
     ]);
-    const poller = new CloudWatchLogsPoller(KEY, 60, state, api);
+    const poller = new AwsCloudWatchLogsPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-06T12:01:30Z"));
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
-      type: "cloudwatch_logs",
+      type: "aws_cloudwatch_logs",
       region: "us-east-1",
       log_group: "/aws/lambda/x",
       message: "ERROR something",
@@ -245,7 +245,7 @@ describe("CloudWatchLogsPoller.tick", () => {
         ],
       },
     ]);
-    const poller = new CloudWatchLogsPoller(KEY, 60, state, api);
+    const poller = new AwsCloudWatchLogsPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-06T12:01:30Z"));
     expect(events.map((e) => e.event_id)).toEqual(["new-one"]);
     expect(state.saved[0]?.last_event_ids.sort()).toEqual(
@@ -274,7 +274,7 @@ describe("CloudWatchLogsPoller.tick", () => {
         ],
       },
     ]);
-    const poller = new CloudWatchLogsPoller(KEY, 60, state, api);
+    const poller = new AwsCloudWatchLogsPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-06T12:01:30Z"));
     expect(events.map((e) => e.event_id)).toEqual(["a", "b"]);
     expect(api.calls).toHaveLength(2);
@@ -284,18 +284,18 @@ describe("CloudWatchLogsPoller.tick", () => {
   it("dryRun does not write state", async () => {
     const state = fakeState(null);
     const api = fakeApi([]);
-    const poller = new CloudWatchLogsPoller(KEY, 60, state, api);
+    const poller = new AwsCloudWatchLogsPoller(KEY, 60, state, api);
     await poller.tick(new Date("2026-05-06T12:00:00Z"), true);
     expect(state.saved).toHaveLength(0);
   });
 });
 
-describe("uniqueCloudWatchLogsTriggers", () => {
+describe("uniqueAwsCloudWatchLogsTriggers", () => {
   function rb(id: string, region: string, group: string, intervalSec: number): Runbook {
     return {
       id,
       trigger: {
-        source: "cloudwatch_logs",
+        source: "aws_cloudwatch_logs",
         region,
         log_group: group,
         interval_sec: intervalSec,
@@ -308,7 +308,7 @@ describe("uniqueCloudWatchLogsTriggers", () => {
   }
 
   it("dedupes by (region, log_group)", () => {
-    const out = uniqueCloudWatchLogsTriggers([
+    const out = uniqueAwsCloudWatchLogsTriggers([
       rb("a", "us-east-1", "/g", 60),
       rb("b", "us-east-1", "/g", 60),
       rb("c", "us-west-2", "/g", 60),
@@ -318,7 +318,7 @@ describe("uniqueCloudWatchLogsTriggers", () => {
   });
 
   it("takes min interval_sec across subscribers of the same key", () => {
-    const out = uniqueCloudWatchLogsTriggers([
+    const out = uniqueAwsCloudWatchLogsTriggers([
       rb("a", "us-east-1", "/g", 60),
       rb("b", "us-east-1", "/g", 30),
       rb("c", "us-east-1", "/g", 120),
@@ -327,7 +327,7 @@ describe("uniqueCloudWatchLogsTriggers", () => {
     expect(out[0]?.intervalSec).toBe(30);
   });
 
-  it("ignores non-cloudwatch_logs runbooks", () => {
+  it("ignores non-aws_cloudwatch_logs runbooks", () => {
     const fileRb: Runbook = {
       id: "x",
       trigger: { source: "file", path: "/var/log/x", pattern: /./ },
@@ -336,7 +336,7 @@ describe("uniqueCloudWatchLogsTriggers", () => {
       ],
       sourcePath: "/tmp/x.yaml",
     };
-    const out = uniqueCloudWatchLogsTriggers([fileRb]);
+    const out = uniqueAwsCloudWatchLogsTriggers([fileRb]);
     expect(out).toEqual([]);
   });
 });

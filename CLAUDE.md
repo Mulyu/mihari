@@ -8,7 +8,7 @@
 
 - `file` トリガー: ログファイルを tail し、新規行が正規表現にマッチで発火
 - `cron` トリガー: 5フィールド cron 式で定期発火
-- `cloudwatch_logs` トリガー: CloudWatch Logs を `interval_sec` 間隔でポーリングし、event 1 件ごとに発火
+- `aws_cloudwatch_logs` トリガー: CloudWatch Logs を `interval_sec` 間隔でポーリングし、event 1 件ごとに発火
 - ステップは `bash` / `claude`（単発）/ `claude_agent`（副作用あり、Agent SDK）の3種別
 - state は `~/.mihari/state/` にローカル保存
 
@@ -55,7 +55,7 @@ mihari/
 │   ├── triggers/               # YAML の trigger.source に対応する取得元
 │   │   ├── file.ts             # FilePoller（offset/inode/size 判定）
 │   │   ├── cron.ts             # CronScheduler（croner で発火判定）
-│   │   └── cloudwatch-logs.ts  # CloudWatchLogsPoller（FilterLogEvents + cursor）
+│   │   └── aws-cloudwatch-logs.ts  # AwsCloudWatchLogsPoller（FilterLogEvents + cursor）
 │   ├── steps/                  # 各ステップの実行
 │   │   ├── template.ts         # 共有テンプレ展開（bash / claude 両方）
 │   │   ├── bash-step.ts        # spawn bash（注入安全）
@@ -84,10 +84,10 @@ Dispatcher.tick():
         if cooldown_sec && elapsed < cooldown_sec: skip
         executor.execute(m.runbook, m.event)
 
-  for CloudWatchLogsPoller:
-    events = poller.tick(now, dryRun)   # CloudWatchLogsEvent[]
+  for AwsCloudWatchLogsPoller:
+    events = poller.tick(now, dryRun)   # AwsCloudWatchLogsEvent[]
     for event:
-      for m in matcher.matchCloudWatchLogs(event, runbooks):
+      for m in matcher.matchAwsCloudWatchLogs(event, runbooks):
         # enabled / cooldown チェックは file と同じ
         executor.execute(m.runbook, m.event)
 
@@ -112,7 +112,7 @@ Executor:
 - `on_failure`: `anyFailed || stopped` のとき実行
 - `on_success`: `!anyFailed && !stopped` のとき実行
 
-`TriggerEvent` は識別共用体（`type: "file" | "cron" | "manual" | "cloudwatch_logs"`）。`bash-step` は `event.type` で `MIHARI_EVENT_LINE` `MIHARI_EVENT_PATH` `MIHARI_EVENT_LOG_STREAM` を埋めるか空文字にする。`event.timestamp` は常に存在。
+`TriggerEvent` は識別共用体（`type: "file" | "cron" | "manual" | "aws_cloudwatch_logs"`）。`bash-step` は `event.type` で `MIHARI_EVENT_LINE` `MIHARI_EVENT_PATH` `MIHARI_EVENT_LOG_STREAM` を埋めるか空文字にする。`event.timestamp` は常に存在。
 
 ## State 配置
 
@@ -120,7 +120,7 @@ Executor:
 ~/.mihari/state/
 ├── pollers/<sha1(path)>.json                  # FilePoller オフセット
 ├── triggers/<sha1(runbook_id)>.json           # CronScheduler last_fired_at
-├── cloudwatch-logs/<sha1(region|group)>.json  # CloudWatchLogsPoller cursor
+├── aws-cloudwatch-logs/<sha1(region|group)>.json  # AwsCloudWatchLogsPoller cursor
 └── runs/<YYYY-MM-DD>/<run_id>.jsonl           # 実行履歴
 ```
 
@@ -146,7 +146,7 @@ Executor:
 - 以降: `next(schedule, last_fired_at) <= now` なら発火し `last_fired_at = now`
 - 1ティックで複数スロットが過ぎていても発火は1回（catch-up しない）
 
-### `CloudWatchLogsPoller`
+### `AwsCloudWatchLogsPoller`
 
 | 状態 | 判定 | 対応 |
 |-----|------|------|
@@ -158,7 +158,7 @@ Executor:
 - boundary 重複: 同 ms に複数 event があり得るため `last_event_ids` で前回観測分を弾く
 - pagination: 1 tick あたり最大 50 hops（残りは次 tick）
 - 同じ `(region, log_group)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され `interval_sec` は最小値が採用される
-- AWS SDK は `cloudwatch_logs` ランブックがある時だけ動的 import（`claude_agent` と同パターン）。認証は SDK 標準チェーンに完全委譲し、mihari は `region` 以外の AWS 固有フィールドを持たない
+- AWS SDK は `aws_cloudwatch_logs` ランブックがある時だけ動的 import（`claude_agent` と同パターン）。認証は SDK 標準チェーンに完全委譲し、mihari は `region` 以外の AWS 固有フィールドを持たない
 
 ## 失敗モードと対応
 
@@ -189,7 +189,7 @@ Executor:
 | テスト | `vitest` |
 | Claude API（単発） | `@anthropic-ai/sdk` |
 | Claude エージェント | `@anthropic-ai/claude-agent-sdk`（claude-step の `agent: true` 時のみ動的 import） |
-| CloudWatch Logs | `@aws-sdk/client-cloudwatch-logs`（`cloudwatch_logs` トリガーが存在する時のみ動的 import） |
+| CloudWatch Logs | `@aws-sdk/client-cloudwatch-logs`（`aws_cloudwatch_logs` トリガーが存在する時のみ動的 import） |
 
 ## コーディング規約
 

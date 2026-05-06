@@ -1,18 +1,18 @@
 import { logger } from "../lib/logger.js";
 import type { StateStore } from "../state/store.js";
 import type {
-  CloudWatchLogsPollerState,
-  CloudWatchLogsTrigger,
+  AwsCloudWatchLogsPollerState,
+  AwsCloudWatchLogsTrigger,
   Runbook,
   TriggerEvent,
 } from "../types/index.js";
 
-const log = logger("trigger.cloudwatch-logs");
+const log = logger("trigger.aws-cloudwatch-logs");
 
-export type CloudWatchLogsEvent = Extract<TriggerEvent, { type: "cloudwatch_logs" }>;
+export type AwsCloudWatchLogsEvent = Extract<TriggerEvent, { type: "aws_cloudwatch_logs" }>;
 
-// AWS SDK の CloudWatchLogsClient + FilterLogEventsCommand を薄くラップした抽象。
-// テストは fake を注入できる。本番は createCloudWatchLogsApi() が SDK を動的 import して返す。
+// AWS SDK の AwsCloudWatchLogsClient + FilterLogEventsCommand を薄くラップした抽象。
+// テストは fake を注入できる。本番は createAwsCloudWatchLogsApi() が SDK を動的 import して返す。
 export interface FilterLogEventsInput {
   logGroupName: string;
   startTime: number;
@@ -29,12 +29,12 @@ export interface FilterLogEventsOutput {
   nextToken?: string;
 }
 
-export interface CloudWatchLogsApi {
+export interface AwsCloudWatchLogsApi {
   filterLogEvents(input: FilterLogEventsInput): Promise<FilterLogEventsOutput>;
 }
 
-export interface CloudWatchLogsApiFactory {
-  forRegion(region: string): CloudWatchLogsApi;
+export interface AwsCloudWatchLogsApiFactory {
+  forRegion(region: string): AwsCloudWatchLogsApi;
 }
 
 // 最大 hop。1 tick で取り切れない量の event があれば残りは次 tick に持ち越す。
@@ -46,7 +46,7 @@ export interface PollDecision {
 }
 
 export function decidePoll(
-  prev: CloudWatchLogsPollerState | null,
+  prev: AwsCloudWatchLogsPollerState | null,
   intervalSec: number,
   now: Date,
 ): PollDecision {
@@ -65,23 +65,23 @@ export interface PollerKey {
   logGroup: string;
 }
 
-export class CloudWatchLogsPoller {
+export class AwsCloudWatchLogsPoller {
   constructor(
     public readonly key: PollerKey,
     public readonly intervalSec: number,
     private readonly state: StateStore,
-    private readonly api: CloudWatchLogsApi,
+    private readonly api: AwsCloudWatchLogsApi,
   ) {}
 
-  async tick(now: Date = new Date(), dryRun = false): Promise<CloudWatchLogsEvent[]> {
-    const prev = this.state.loadCloudWatchLogsState(this.key);
+  async tick(now: Date = new Date(), dryRun = false): Promise<AwsCloudWatchLogsEvent[]> {
+    const prev = this.state.loadAwsCloudWatchLogsState(this.key);
     const decision = decidePoll(prev, this.intervalSec, now);
 
     if (decision.action === "skip") return [];
 
     if (decision.action === "seed") {
       if (!dryRun) {
-        await this.state.saveCloudWatchLogsState({
+        await this.state.saveAwsCloudWatchLogsState({
           region: this.key.region,
           log_group: this.key.logGroup,
           last_event_timestamp_ms: now.getTime(),
@@ -118,8 +118,8 @@ export class CloudWatchLogsPoller {
       }
     } while (nextToken);
 
-    const events: CloudWatchLogsEvent[] = collected.map((e) => ({
-      type: "cloudwatch_logs",
+    const events: AwsCloudWatchLogsEvent[] = collected.map((e) => ({
+      type: "aws_cloudwatch_logs",
       region: this.key.region,
       log_group: this.key.logGroup,
       log_stream: e.logStreamName,
@@ -131,7 +131,7 @@ export class CloudWatchLogsPoller {
 
     if (!dryRun) {
       const next = computeNextState(prev, this.key, collected, now);
-      await this.state.saveCloudWatchLogsState(next);
+      await this.state.saveAwsCloudWatchLogsState(next);
     }
 
     return events;
@@ -141,11 +141,11 @@ export class CloudWatchLogsPoller {
 // 新 cursor を計算する。max timestamp に進め、その timestamp に並んだ eventId を
 // `last_event_ids` として残す。次回ポーリングの boundary 重複除去に使う。
 export function computeNextState(
-  prev: CloudWatchLogsPollerState | null,
+  prev: AwsCloudWatchLogsPollerState | null,
   key: PollerKey,
   newEvents: FilterLogEventsOutput["events"],
   now: Date,
-): CloudWatchLogsPollerState {
+): AwsCloudWatchLogsPollerState {
   const prevMaxMs = prev?.last_event_timestamp_ms ?? now.getTime();
   let maxMs = prevMaxMs;
   for (const e of newEvents) {
@@ -168,13 +168,13 @@ export function computeNextState(
   };
 }
 
-type CloudWatchLogsRunbook = Runbook & { trigger: CloudWatchLogsTrigger };
+type AwsCloudWatchLogsRunbook = Runbook & { trigger: AwsCloudWatchLogsTrigger };
 
-function isCloudWatchLogsRunbook(rb: Runbook): rb is CloudWatchLogsRunbook {
-  return rb.trigger.source === "cloudwatch_logs";
+function isAwsCloudWatchLogsRunbook(rb: Runbook): rb is AwsCloudWatchLogsRunbook {
+  return rb.trigger.source === "aws_cloudwatch_logs";
 }
 
-export interface UniqueCloudWatchLogsTrigger {
+export interface UniqueAwsCloudWatchLogsTrigger {
   region: string;
   logGroup: string;
   intervalSec: number;
@@ -182,12 +182,12 @@ export interface UniqueCloudWatchLogsTrigger {
 
 // (region, log_group) でグループ化。同じ key を購読する複数 runbook がある場合、
 // interval は min を取る（短い間隔で取れば長い間隔の購読側にも届く）。
-export function uniqueCloudWatchLogsTriggers(
+export function uniqueAwsCloudWatchLogsTriggers(
   runbooks: Runbook[],
-): UniqueCloudWatchLogsTrigger[] {
-  const groups = new Map<string, UniqueCloudWatchLogsTrigger>();
+): UniqueAwsCloudWatchLogsTrigger[] {
+  const groups = new Map<string, UniqueAwsCloudWatchLogsTrigger>();
   for (const rb of runbooks) {
-    if (!isCloudWatchLogsRunbook(rb)) continue;
+    if (!isAwsCloudWatchLogsRunbook(rb)) continue;
     const key = `${rb.trigger.region}|${rb.trigger.log_group}`;
     const existing = groups.get(key);
     if (existing) {
@@ -203,19 +203,19 @@ export function uniqueCloudWatchLogsTriggers(
   return [...groups.values()];
 }
 
-// SDK は cloudwatch_logs トリガーが 1 つでも存在するときだけ動的 import する。
+// SDK は aws_cloudwatch_logs トリガーが 1 つでも存在するときだけ動的 import する。
 // それ以外のユーザーには @aws-sdk/client-cloudwatch-logs の起動コストが乗らない。
-export async function createCloudWatchLogsApiFactory(): Promise<CloudWatchLogsApiFactory> {
+export async function createAwsCloudWatchLogsApiFactory(): Promise<AwsCloudWatchLogsApiFactory> {
   const sdk = await import("@aws-sdk/client-cloudwatch-logs");
   const { CloudWatchLogsClient, FilterLogEventsCommand } = sdk;
 
-  const cache = new Map<string, CloudWatchLogsApi>();
+  const cache = new Map<string, AwsCloudWatchLogsApi>();
   return {
     forRegion(region: string) {
       const existing = cache.get(region);
       if (existing) return existing;
       const client = new CloudWatchLogsClient({ region });
-      const api: CloudWatchLogsApi = {
+      const api: AwsCloudWatchLogsApi = {
         async filterLogEvents(input) {
           const out = await client.send(
             new FilterLogEventsCommand({

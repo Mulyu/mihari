@@ -36,7 +36,7 @@ const manualEvent: TriggerEvent = {
 };
 
 const cwEvent: TriggerEvent = {
-  type: "cloudwatch_logs",
+  type: "aws_cloudwatch_logs",
   region: "us-east-1",
   log_group: "/aws/lambda/x",
   log_stream: "stream-1",
@@ -126,13 +126,13 @@ describe("buildEnv", () => {
     expect(env["MIHARI_EVENT_TIMESTAMP"]).toBe(manualEvent.timestamp);
   });
 
-  it("populates MIHARI_EVENT_* + MIHARI_EVENT_LOG_STREAM from a cloudwatch_logs event", () => {
+  it("populates MIHARI_EVENT_* + MIHARI_EVENT_LOG_STREAM from a aws_cloudwatch_logs event", () => {
     const env = buildEnv({}, step(), {
       event: cwEvent,
       capturedSteps: {},
       idempotencyKey: "test-key",
     });
-    if (cwEvent.type !== "cloudwatch_logs") throw new Error("type narrow");
+    if (cwEvent.type !== "aws_cloudwatch_logs") throw new Error("type narrow");
     expect(env["MIHARI_EVENT_LINE"]).toBe(cwEvent.message);
     expect(env["MIHARI_EVENT_PATH"]).toBe(cwEvent.log_group);
     expect(env["MIHARI_EVENT_LOG_STREAM"]).toBe(cwEvent.log_stream);

@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { logger } from "../lib/logger.js";
 import type {
-  CloudWatchLogsPollerState,
+  AwsCloudWatchLogsPollerState,
   PollerState,
   RunResult,
   TriggerState,
@@ -31,7 +31,7 @@ export class StateStore {
     this.baseDir = opts.baseDir ?? defaultStateDir();
     mkdirSync(join(this.baseDir, "pollers"), { recursive: true });
     mkdirSync(join(this.baseDir, "triggers"), { recursive: true });
-    mkdirSync(join(this.baseDir, "cloudwatch-logs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "aws-cloudwatch-logs"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -100,24 +100,24 @@ export class StateStore {
     }
   }
 
-  cloudWatchLogsStateFile(key: { region: string; logGroup: string }): string {
+  awsCloudWatchLogsStateFile(key: { region: string; logGroup: string }): string {
     const hash = createHash("sha1")
       .update(`${key.region}|${key.logGroup}`)
       .digest("hex")
       .slice(0, 16);
-    return join(this.baseDir, "cloudwatch-logs", `${hash}.json`);
+    return join(this.baseDir, "aws-cloudwatch-logs", `${hash}.json`);
   }
 
-  loadCloudWatchLogsState(key: {
+  loadAwsCloudWatchLogsState(key: {
     region: string;
     logGroup: string;
-  }): CloudWatchLogsPollerState | null {
-    const file = this.cloudWatchLogsStateFile(key);
+  }): AwsCloudWatchLogsPollerState | null {
+    const file = this.awsCloudWatchLogsStateFile(key);
     try {
       const text = readFileSync(file, "utf8");
       const obj = JSON.parse(text);
-      if (!validateCloudWatchLogsState(obj)) {
-        log.warn({ file }, "cloudwatch-logs state invalid, ignoring");
+      if (!validateAwsCloudWatchLogsState(obj)) {
+        log.warn({ file }, "aws-cloudwatch-logs state invalid, ignoring");
         return null;
       }
       return obj;
@@ -126,14 +126,14 @@ export class StateStore {
       if (err.code === "ENOENT") return null;
       log.warn(
         { file, err: err.message },
-        "cloudwatch-logs state read failed, treating as empty",
+        "aws-cloudwatch-logs state read failed, treating as empty",
       );
       return null;
     }
   }
 
-  async saveCloudWatchLogsState(state: CloudWatchLogsPollerState): Promise<void> {
-    const file = this.cloudWatchLogsStateFile({
+  async saveAwsCloudWatchLogsState(state: AwsCloudWatchLogsPollerState): Promise<void> {
+    const file = this.awsCloudWatchLogsStateFile({
       region: state.region,
       logGroup: state.log_group,
     });
@@ -142,7 +142,7 @@ export class StateStore {
     } catch (e) {
       log.warn(
         { file, err: (e as Error).message },
-        "cloudwatch-logs state write failed",
+        "aws-cloudwatch-logs state write failed",
       );
     }
   }
@@ -271,7 +271,7 @@ function validateTriggerState(v: unknown): v is TriggerState {
   return typeof o["runbook_id"] === "string" && typeof o["last_fired_at"] === "string";
 }
 
-function validateCloudWatchLogsState(v: unknown): v is CloudWatchLogsPollerState {
+function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPollerState {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (

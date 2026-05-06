@@ -1,8 +1,8 @@
-import { match, matchCloudWatchLogs } from "./matcher.js";
+import { match, matchAwsCloudWatchLogs } from "./matcher.js";
 import type { Executor } from "./executor.js";
 import type { CronScheduler } from "../triggers/cron.js";
 import type { FilePoller } from "../triggers/file.js";
-import type { CloudWatchLogsPoller } from "../triggers/cloudwatch-logs.js";
+import type { AwsCloudWatchLogsPoller } from "../triggers/aws-cloudwatch-logs.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
 
@@ -11,7 +11,7 @@ export interface DispatcherInput {
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
   // 配線していないテスト互換のため optional。本番 (CLI bootstrap) では必ず配列で渡す。
-  cloudWatchLogsPollers?: CloudWatchLogsPoller[];
+  awsCloudWatchLogsPollers?: AwsCloudWatchLogsPoller[];
   executor: Executor;
   state: StateStore;
 }
@@ -51,17 +51,17 @@ export async function tick(
     }
   }
 
-  for (const cwPoller of input.cloudWatchLogsPollers ?? []) {
+  for (const cwPoller of input.awsCloudWatchLogsPollers ?? []) {
     const events = await cwPoller.tick(new Date(), opts.dryRun ?? false);
     for (const event of events) {
-      const matches = matchCloudWatchLogs(event, input.runbooks);
+      const matches = matchAwsCloudWatchLogs(event, input.runbooks);
       for (const m of matches) {
         if (m.runbook.enabled === false) continue;
         if (!isCooldownElapsed(m.runbook, input.state)) continue;
         fired++;
         if (opts.dryRun) {
           opts.onDryRun?.(
-            `${m.runbook.id} <- cloudwatch_logs:${event.log_group}/${event.log_stream}: ${event.message}`,
+            `${m.runbook.id} <- aws_cloudwatch_logs:${event.log_group}/${event.log_stream}: ${event.message}`,
           );
           continue;
         }

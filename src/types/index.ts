@@ -1,4 +1,4 @@
-export type Trigger = FileTrigger | CronTrigger | CloudWatchLogsTrigger;
+export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger;
 
 export type Step = BashStep | ClaudeStep | ClaudeAgentStep;
 
@@ -26,8 +26,8 @@ export interface CronTrigger {
 // CloudWatch Logs を `file` トリガーと対称な「リモートのログストリーム」として扱う。
 // pattern は省略可。省略時は全 event がマッチ。
 // region は明示必須（SDK の region 解決には頼らず、state key の同一性も担保する）。
-export interface CloudWatchLogsTrigger {
-  source: "cloudwatch_logs";
+export interface AwsCloudWatchLogsTrigger {
+  source: "aws_cloudwatch_logs";
   region: string;
   log_group: string;
   pattern?: RegExp;
@@ -94,7 +94,7 @@ export type TriggerEvent =
   | { type: "cron"; timestamp: string }
   | { type: "manual"; timestamp: string }
   | {
-      type: "cloudwatch_logs";
+      type: "aws_cloudwatch_logs";
       region: string;
       log_group: string;
       log_stream: string;
@@ -133,7 +133,7 @@ export interface TriggerState {
 // CloudWatch Logs poller の cursor。
 // `last_event_timestamp_ms` は次回 FilterLogEvents 呼び出しの startTime（inclusive）。
 // `last_event_ids` は同 ms に複数 event があり得るため boundary 重複除去用。
-export interface CloudWatchLogsPollerState {
+export interface AwsCloudWatchLogsPollerState {
   region: string;
   log_group: string;
   last_event_timestamp_ms: number;

@@ -23,7 +23,7 @@ export function buildEnv(
     env["MIHARI_EVENT_LINE"] = ctx.event.content;
     env["MIHARI_EVENT_PATH"] = ctx.event.path;
     env["MIHARI_EVENT_LOG_STREAM"] = "";
-  } else if (ctx.event.type === "cloudwatch_logs") {
+  } else if (ctx.event.type === "aws_cloudwatch_logs") {
     env["MIHARI_EVENT_LINE"] = ctx.event.message;
     env["MIHARI_EVENT_PATH"] = ctx.event.log_group;
     env["MIHARI_EVENT_LOG_STREAM"] = ctx.event.log_stream;

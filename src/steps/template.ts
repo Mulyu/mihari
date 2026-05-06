@@ -34,17 +34,17 @@ export function substituteClaudeTemplate(text: string, ctx: StepContext): string
   return text.replace(TEMPLATE_RE, (raw, key: string) => {
     if (key === "event.line") {
       if (ctx.event.type === "file") return ctx.event.content;
-      if (ctx.event.type === "cloudwatch_logs") return ctx.event.message;
+      if (ctx.event.type === "aws_cloudwatch_logs") return ctx.event.message;
       return "";
     }
     if (key === "event.path") {
       if (ctx.event.type === "file") return ctx.event.path;
-      if (ctx.event.type === "cloudwatch_logs") return ctx.event.log_group;
+      if (ctx.event.type === "aws_cloudwatch_logs") return ctx.event.log_group;
       return "";
     }
     if (key === "event.timestamp") return ctx.event.timestamp;
     if (key === "event.log_stream") {
-      return ctx.event.type === "cloudwatch_logs" ? ctx.event.log_stream : "";
+      return ctx.event.type === "aws_cloudwatch_logs" ? ctx.event.log_stream : "";
     }
     if (key.startsWith("env.")) return process.env[key.slice(4)] ?? "";
     if (key.startsWith("steps.") && key.endsWith(".output")) {

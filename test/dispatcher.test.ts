@@ -3,7 +3,7 @@ import { tick } from "../src/engine/dispatcher.js";
 import type { Executor } from "../src/engine/executor.js";
 import type { CronScheduler } from "../src/triggers/cron.js";
 import type { FilePoller } from "../src/triggers/file.js";
-import type { CloudWatchLogsPoller } from "../src/triggers/cloudwatch-logs.js";
+import type { AwsCloudWatchLogsPoller } from "../src/triggers/aws-cloudwatch-logs.js";
 import type { StateStore } from "../src/state/store.js";
 import type { Runbook, RunResult, TriggerEvent } from "../src/types/index.js";
 
@@ -62,20 +62,20 @@ function fakeFilePoller(events: TriggerEvent[]): FilePoller {
   } as unknown as FilePoller;
 }
 
-function fakeCloudWatchLogsPoller(events: TriggerEvent[]): CloudWatchLogsPoller {
+function fakeAwsCloudWatchLogsPoller(events: TriggerEvent[]): AwsCloudWatchLogsPoller {
   return {
     key: { region: "us-east-1", logGroup: "/g" },
     intervalSec: 60,
-    tick: vi.fn().mockResolvedValue(events.filter((e) => e.type === "cloudwatch_logs")),
-  } as unknown as CloudWatchLogsPoller;
+    tick: vi.fn().mockResolvedValue(events.filter((e) => e.type === "aws_cloudwatch_logs")),
+  } as unknown as AwsCloudWatchLogsPoller;
 }
 
 function cwRb(id: string, region: string, group: string, pattern?: RegExp): Runbook {
   return {
     id,
     trigger: pattern
-      ? { source: "cloudwatch_logs", region, log_group: group, interval_sec: 60, pattern }
-      : { source: "cloudwatch_logs", region, log_group: group, interval_sec: 60 },
+      ? { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60, pattern }
+      : { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60 },
     steps: [
       { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
     ],
@@ -224,11 +224,11 @@ describe("dispatcher tick", () => {
   });
 });
 
-describe("dispatcher: cloudwatch_logs", () => {
-  it("passes cloudwatch_logs events through matcher to executor", async () => {
+describe("dispatcher: aws_cloudwatch_logs", () => {
+  it("passes aws_cloudwatch_logs events through matcher to executor", async () => {
     const rb = cwRb("a", "us-east-1", "/g", /ERROR/);
     const event: TriggerEvent = {
-      type: "cloudwatch_logs",
+      type: "aws_cloudwatch_logs",
       region: "us-east-1",
       log_group: "/g",
       log_stream: "s",
@@ -242,7 +242,7 @@ describe("dispatcher: cloudwatch_logs", () => {
       runbooks: [rb],
       pollers: [],
       cronSchedulers: [],
-      cloudWatchLogsPollers: [fakeCloudWatchLogsPoller([event])],
+      awsCloudWatchLogsPollers: [fakeAwsCloudWatchLogsPoller([event])],
       executor: exec,
       state: fakeState(),
     });
@@ -252,10 +252,10 @@ describe("dispatcher: cloudwatch_logs", () => {
     expect(exec.calls[0]?.event).toBe(event);
   });
 
-  it("skips cloudwatch_logs events whose pattern does not match", async () => {
+  it("skips aws_cloudwatch_logs events whose pattern does not match", async () => {
     const rb = cwRb("a", "us-east-1", "/g", /ERROR/);
     const event: TriggerEvent = {
-      type: "cloudwatch_logs",
+      type: "aws_cloudwatch_logs",
       region: "us-east-1",
       log_group: "/g",
       log_stream: "s",
@@ -269,7 +269,7 @@ describe("dispatcher: cloudwatch_logs", () => {
       runbooks: [rb],
       pollers: [],
       cronSchedulers: [],
-      cloudWatchLogsPollers: [fakeCloudWatchLogsPoller([event])],
+      awsCloudWatchLogsPollers: [fakeAwsCloudWatchLogsPoller([event])],
       executor: exec,
       state: fakeState(),
     });
@@ -280,13 +280,13 @@ describe("dispatcher: cloudwatch_logs", () => {
   it("dryRun passes dryRun=true and date to cloudwatch poller tick", async () => {
     const rb = cwRb("a", "us-east-1", "/g");
     const exec = fakeExecutor();
-    const poller = fakeCloudWatchLogsPoller([]);
+    const poller = fakeAwsCloudWatchLogsPoller([]);
     await tick(
       {
         runbooks: [rb],
         pollers: [],
         cronSchedulers: [],
-        cloudWatchLogsPollers: [poller],
+        awsCloudWatchLogsPollers: [poller],
         executor: exec,
         state: fakeState(),
       },

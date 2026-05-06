@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type {
-  CloudWatchLogsTrigger,
+  AwsCloudWatchLogsTrigger,
   FileTrigger,
   Match,
   Runbook,
@@ -8,14 +8,14 @@ import type {
 } from "../types/index.js";
 
 type FileRunbook = Runbook & { trigger: FileTrigger };
-type CloudWatchLogsRunbook = Runbook & { trigger: CloudWatchLogsTrigger };
+type AwsCloudWatchLogsRunbook = Runbook & { trigger: AwsCloudWatchLogsTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
 }
 
-function isCloudWatchLogsRunbook(rb: Runbook): rb is CloudWatchLogsRunbook {
-  return rb.trigger.source === "cloudwatch_logs";
+function isAwsCloudWatchLogsRunbook(rb: Runbook): rb is AwsCloudWatchLogsRunbook {
+  return rb.trigger.source === "aws_cloudwatch_logs";
 }
 
 export function match(
@@ -32,12 +32,12 @@ export function match(
     .map((r) => ({ runbook: r, event }));
 }
 
-export function matchCloudWatchLogs(
-  event: Extract<TriggerEvent, { type: "cloudwatch_logs" }>,
+export function matchAwsCloudWatchLogs(
+  event: Extract<TriggerEvent, { type: "aws_cloudwatch_logs" }>,
   runbooks: Runbook[],
 ): Match[] {
   return runbooks
-    .filter(isCloudWatchLogsRunbook)
+    .filter(isAwsCloudWatchLogsRunbook)
     .filter(
       (r) =>
         r.trigger.region === event.region &&

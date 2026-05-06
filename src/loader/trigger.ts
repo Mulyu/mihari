@@ -33,7 +33,7 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     }
     return { source: "cron", schedule };
   }
-  if (source === "cloudwatch_logs") {
+  if (source === "aws_cloudwatch_logs") {
     const region = mustString(raw, "region", file, "trigger.region");
     const log_group = mustString(raw, "log_group", file, "trigger.log_group");
     const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
@@ -56,7 +56,7 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
       }
     }
     const t: Trigger = {
-      source: "cloudwatch_logs",
+      source: "aws_cloudwatch_logs",
       region,
       log_group,
       interval_sec,
@@ -66,6 +66,6 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
   }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", or "cloudwatch_logs" (got: ${source})`,
+    `trigger.source must be "file", "cron", or "aws_cloudwatch_logs" (got: ${source})`,
   );
 }

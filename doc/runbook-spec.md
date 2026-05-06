@@ -11,7 +11,7 @@ id: kebab-case-id          # Required. Must match `[a-z0-9][a-z0-9-]*`.
 description: ...           # Optional.
 enabled: true              # Optional. When false, daemon/poll skips firing (default true).
 cooldown_sec: 300          # Optional. Suppress refiring within N seconds of the last fire.
-trigger: ...               # Required. file, cron, or cloudwatch_logs.
+trigger: ...               # Required. file, cron, or aws_cloudwatch_logs.
 steps: [ ... ]             # Required. At least one entry.
 ```
 
@@ -47,11 +47,11 @@ trigger:
 
 On first observation the trigger does not fire; it waits for the next slot. Manual testing: `mihari run <id>`. If multiple slots pass between ticks, only one fire is emitted (no catch-up).
 
-### `cloudwatch_logs`
+### `aws_cloudwatch_logs`
 
 ```yaml
 trigger:
-  source: cloudwatch_logs
+  source: aws_cloudwatch_logs
   region: us-east-1
   log_group: /aws/lambda/myfunc
   pattern: "ERROR"             # optional regex on the message body
@@ -67,7 +67,7 @@ trigger:
 
 Semantics mirror the `file` trigger: each matched event fires the runbook once, and on first observation no historical events are pulled (cursor seeds at "now").
 
-State (cursor) lives at `~/.mihari/state/cloudwatch-logs/<sha1(region|log_group)>.json`. Cursor write failure is fail-open (warn log, processing continues).
+State (cursor) lives at `~/.mihari/state/aws-cloudwatch-logs/<sha1(region|log_group)>.json`. Cursor write failure is fail-open (warn log, processing continues).
 
 Authentication is delegated entirely to the AWS SDK default credential chain (env vars / `~/.aws/credentials` / IAM role). mihari exposes no auth fields. The SDK is dynamically imported only when at least one runbook uses this trigger.
 
@@ -119,7 +119,7 @@ stdout / stderr are recorded in the logs and the history JSONL.
 
 Templates are expanded with `{{ ... }}`. Values are passed in as environment variables, so injection text mixed into log lines is safe.
 
-| Variable | `file` | `cron` | `cloudwatch_logs` |
+| Variable | `file` | `cron` | `aws_cloudwatch_logs` |
 |------|--------|--------|---|
 | `{{ event.line }}` | The matched line | Empty string | The event message |
 | `{{ event.path }}` | Path to the log file | Empty string | The log group name |
@@ -255,4 +255,4 @@ See `runbooks/examples/`:
 - `k8s-pod-restart-summary.yaml` — Periodic Pod-restart aggregation (cron + capture)
 - `error-analysis.yaml` — Analyzes error logs with Claude and suggests remediation (file + claude step)
 - `error-fix-pr.yaml` — Lets Claude fix the bug, push a branch, and open a PR (file + claude agent step)
-- `cloudwatch-logs-error-alert.yaml` — Alerts on CloudWatch Logs ERROR events (cloudwatch_logs)
+- `aws-cloudwatch-logs-error-alert.yaml` — Alerts on CloudWatch Logs ERROR events (aws_cloudwatch_logs)

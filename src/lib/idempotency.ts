@@ -23,6 +23,15 @@ export function computeIdempotencyKey(runbookId: string, event: TriggerEvent): s
     hash.update("cron\0");
     // 分単位に切り捨てて、1分以内の重複観測でも同じキーが出るようにする
     hash.update(event.timestamp.slice(0, 16));
+  } else if (event.type === "aws_cloudwatch_logs") {
+    hash.update("aws_cloudwatch_logs\0");
+    hash.update(event.region);
+    hash.update("\0");
+    hash.update(event.log_group);
+    hash.update("\0");
+    // CloudWatch Logs の eventId は (group, stream, ingestion) で一意。同じ event を
+    // 再観測したら同じキーになる。
+    hash.update(event.event_id);
   } else {
     hash.update("manual\0");
     hash.update(event.timestamp);

@@ -18,9 +18,20 @@ export function buildEnv(
   ctx: StepContext,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, ...step.env };
-  // file 以外のトリガーでは line / path に意味が無いので空文字を入れる。
-  env["MIHARI_EVENT_LINE"] = ctx.event.type === "file" ? ctx.event.content : "";
-  env["MIHARI_EVENT_PATH"] = ctx.event.type === "file" ? ctx.event.path : "";
+  // line / path / log_stream はトリガー種別ごとに意味が違う。該当しない型では空文字。
+  if (ctx.event.type === "file") {
+    env["MIHARI_EVENT_LINE"] = ctx.event.content;
+    env["MIHARI_EVENT_PATH"] = ctx.event.path;
+    env["MIHARI_EVENT_LOG_STREAM"] = "";
+  } else if (ctx.event.type === "aws_cloudwatch_logs") {
+    env["MIHARI_EVENT_LINE"] = ctx.event.message;
+    env["MIHARI_EVENT_PATH"] = ctx.event.log_group;
+    env["MIHARI_EVENT_LOG_STREAM"] = ctx.event.log_stream;
+  } else {
+    env["MIHARI_EVENT_LINE"] = "";
+    env["MIHARI_EVENT_PATH"] = "";
+    env["MIHARI_EVENT_LOG_STREAM"] = "";
+  }
   env["MIHARI_EVENT_TIMESTAMP"] = ctx.event.timestamp;
   env["MIHARI_IDEMPOTENCY_KEY"] = ctx.idempotencyKey;
   for (const [stepId, value] of Object.entries(ctx.capturedSteps)) {

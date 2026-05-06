@@ -1,7 +1,7 @@
 import { Cron } from "croner";
 import type { Trigger } from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
-import { isObject, mustString } from "./primitives.js";
+import { isObject, mustString, optionalNumber, optionalString } from "./primitives.js";
 
 export function validateTrigger(raw: unknown, file: string): Trigger {
   if (!isObject(raw)) throw new RunbookValidationError(file, "trigger must be a mapping");
@@ -33,8 +33,39 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     }
     return { source: "cron", schedule };
   }
+  if (source === "aws_cloudwatch_logs") {
+    const region = mustString(raw, "region", file, "trigger.region");
+    const log_group = mustString(raw, "log_group", file, "trigger.log_group");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const patternStr = optionalString(raw, "pattern", file, "trigger.pattern");
+    let pattern: RegExp | undefined;
+    if (patternStr !== undefined) {
+      try {
+        pattern = new RegExp(patternStr);
+      } catch (e) {
+        throw new RunbookValidationError(
+          file,
+          `trigger.pattern is not a valid regex: ${(e as Error).message}`,
+        );
+      }
+    }
+    const t: Trigger = {
+      source: "aws_cloudwatch_logs",
+      region,
+      log_group,
+      interval_sec,
+    };
+    if (pattern !== undefined) t.pattern = pattern;
+    return t;
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file" or "cron" (got: ${source})`,
+    `trigger.source must be "file", "cron", or "aws_cloudwatch_logs" (got: ${source})`,
   );
 }

@@ -3,6 +3,7 @@ import { tick } from "../src/engine/dispatcher.js";
 import type { Executor } from "../src/engine/executor.js";
 import type { CronScheduler } from "../src/triggers/cron.js";
 import type { FilePoller } from "../src/triggers/file.js";
+import type { AwsCloudWatchLogsPoller } from "../src/triggers/aws-cloudwatch-logs.js";
 import type { StateStore } from "../src/state/store.js";
 import type { Runbook, RunResult, TriggerEvent } from "../src/types/index.js";
 
@@ -59,6 +60,27 @@ function fakeFilePoller(events: TriggerEvent[]): FilePoller {
     path: "/tmp/x.log",
     tick: vi.fn().mockResolvedValue(events.filter((e) => e.type === "file")),
   } as unknown as FilePoller;
+}
+
+function fakeAwsCloudWatchLogsPoller(events: TriggerEvent[]): AwsCloudWatchLogsPoller {
+  return {
+    key: { region: "us-east-1", logGroup: "/g" },
+    intervalSec: 60,
+    tick: vi.fn().mockResolvedValue(events.filter((e) => e.type === "aws_cloudwatch_logs")),
+  } as unknown as AwsCloudWatchLogsPoller;
+}
+
+function cwRb(id: string, region: string, group: string, pattern?: RegExp): Runbook {
+  return {
+    id,
+    trigger: pattern
+      ? { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60, pattern }
+      : { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60 },
+    steps: [
+      { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
+    ],
+    sourcePath: `/tmp/${id}.yaml`,
+  };
 }
 
 function fakeCronScheduler(runbook: Runbook, event: TriggerEvent | null): CronScheduler {
@@ -199,6 +221,78 @@ describe("dispatcher tick", () => {
     const poller = fakeFilePoller([]);
     await tick({ runbooks: [rb], pollers: [poller], cronSchedulers: [], executor: exec, state: fakeState() });
     expect(poller.tick).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("dispatcher: aws_cloudwatch_logs", () => {
+  it("passes aws_cloudwatch_logs events through matcher to executor", async () => {
+    const rb = cwRb("a", "us-east-1", "/g", /ERROR/);
+    const event: TriggerEvent = {
+      type: "aws_cloudwatch_logs",
+      region: "us-east-1",
+      log_group: "/g",
+      log_stream: "s",
+      message: "ERROR boom",
+      event_id: "e1",
+      timestamp: "t",
+      timestamp_ms: 0,
+    };
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      awsCloudWatchLogsPollers: [fakeAwsCloudWatchLogsPoller([event])],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(1);
+    expect(exec.calls).toHaveLength(1);
+    expect(exec.calls[0]?.runbook.id).toBe("a");
+    expect(exec.calls[0]?.event).toBe(event);
+  });
+
+  it("skips aws_cloudwatch_logs events whose pattern does not match", async () => {
+    const rb = cwRb("a", "us-east-1", "/g", /ERROR/);
+    const event: TriggerEvent = {
+      type: "aws_cloudwatch_logs",
+      region: "us-east-1",
+      log_group: "/g",
+      log_stream: "s",
+      message: "INFO ok",
+      event_id: "e1",
+      timestamp: "t",
+      timestamp_ms: 0,
+    };
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      awsCloudWatchLogsPollers: [fakeAwsCloudWatchLogsPoller([event])],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("dryRun passes dryRun=true and date to cloudwatch poller tick", async () => {
+    const rb = cwRb("a", "us-east-1", "/g");
+    const exec = fakeExecutor();
+    const poller = fakeAwsCloudWatchLogsPoller([]);
+    await tick(
+      {
+        runbooks: [rb],
+        pollers: [],
+        cronSchedulers: [],
+        awsCloudWatchLogsPollers: [poller],
+        executor: exec,
+        state: fakeState(),
+      },
+      { dryRun: true },
+    );
+    expect(poller.tick).toHaveBeenCalledWith(expect.any(Date), true);
   });
 });
 

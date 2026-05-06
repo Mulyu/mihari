@@ -35,6 +35,17 @@ const manualEvent: TriggerEvent = {
   timestamp: "2026-04-26T00:00:00Z",
 };
 
+const cwEvent: TriggerEvent = {
+  type: "aws_cloudwatch_logs",
+  region: "us-east-1",
+  log_group: "/aws/lambda/x",
+  log_stream: "stream-1",
+  message: "ERROR boom",
+  event_id: "evt-1",
+  timestamp: "2026-04-26T00:00:00Z",
+  timestamp_ms: 1745625600000,
+};
+
 describe("substituteTemplate", () => {
   it("replaces event vars with bare braced env refs (quoting is the user's job)", () => {
     expect(substituteTemplate("echo {{ event.line }}")).toBe("echo ${MIHARI_EVENT_LINE}");
@@ -45,6 +56,12 @@ describe("substituteTemplate", () => {
 
   it("replaces env.NAME with bare braced env ref", () => {
     expect(substituteTemplate("region={{ env.AWS_REGION }}")).toBe("region=${AWS_REGION}");
+  });
+
+  it("replaces event.log_stream with the corresponding env ref", () => {
+    expect(substituteTemplate("stream={{ event.log_stream }}")).toBe(
+      "stream=${MIHARI_EVENT_LOG_STREAM}",
+    );
   });
 
   it("replaces steps.<id>.output with normalized env ref", () => {
@@ -105,7 +122,21 @@ describe("buildEnv", () => {
     const env = buildEnv({}, step(), { event: manualEvent, capturedSteps: {}, idempotencyKey: "test-key" });
     expect(env["MIHARI_EVENT_LINE"]).toBe("");
     expect(env["MIHARI_EVENT_PATH"]).toBe("");
+    expect(env["MIHARI_EVENT_LOG_STREAM"]).toBe("");
     expect(env["MIHARI_EVENT_TIMESTAMP"]).toBe(manualEvent.timestamp);
+  });
+
+  it("populates MIHARI_EVENT_* + MIHARI_EVENT_LOG_STREAM from a aws_cloudwatch_logs event", () => {
+    const env = buildEnv({}, step(), {
+      event: cwEvent,
+      capturedSteps: {},
+      idempotencyKey: "test-key",
+    });
+    if (cwEvent.type !== "aws_cloudwatch_logs") throw new Error("type narrow");
+    expect(env["MIHARI_EVENT_LINE"]).toBe(cwEvent.message);
+    expect(env["MIHARI_EVENT_PATH"]).toBe(cwEvent.log_group);
+    expect(env["MIHARI_EVENT_LOG_STREAM"]).toBe(cwEvent.log_stream);
+    expect(env["MIHARI_EVENT_TIMESTAMP"]).toBe(cwEvent.timestamp);
   });
 
   it("merges step env over base env", () => {

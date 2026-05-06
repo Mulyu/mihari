@@ -67,4 +67,34 @@ describe("computeIdempotencyKey", () => {
     const b: TriggerEvent = { type: "manual", timestamp: "2026-05-05T00:00:01.000Z" };
     expect(computeIdempotencyKey("rb", a)).not.toBe(computeIdempotencyKey("rb", b));
   });
+
+  it("aws_cloudwatch_logs events keyed on event_id (timestamps ignored)", () => {
+    const a: TriggerEvent = {
+      type: "aws_cloudwatch_logs",
+      region: "us-east-1",
+      log_group: "/g",
+      log_stream: "s",
+      message: "m",
+      event_id: "abc",
+      timestamp: "2026-05-05T00:00:00.000Z",
+      timestamp_ms: 0,
+    };
+    const b: TriggerEvent = { ...a, timestamp: "2026-05-05T01:00:00.000Z", timestamp_ms: 9999 };
+    expect(computeIdempotencyKey("rb", a)).toBe(computeIdempotencyKey("rb", b));
+  });
+
+  it("aws_cloudwatch_logs events with different event_id get different keys", () => {
+    const a: TriggerEvent = {
+      type: "aws_cloudwatch_logs",
+      region: "us-east-1",
+      log_group: "/g",
+      log_stream: "s",
+      message: "m",
+      event_id: "abc",
+      timestamp: "2026-05-05T00:00:00.000Z",
+      timestamp_ms: 0,
+    };
+    const b: TriggerEvent = { ...a, event_id: "xyz" };
+    expect(computeIdempotencyKey("rb", a)).not.toBe(computeIdempotencyKey("rb", b));
+  });
 });

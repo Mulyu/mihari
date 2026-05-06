@@ -2,7 +2,7 @@
 
 > **日本語** | [English](./README.md)
 
-ローカルのログファイル、または cron スケジュールに反応して bash ランブックを実行する CLI。
+ローカルのログファイル、cron スケジュール、または CloudWatch Logs に反応して bash ランブックを実行する CLI。
 
 > mihari (見張り) — ログを見張って、決まった対応を自動で走らせる軽量エンジン。
 
@@ -10,6 +10,7 @@
 
 - ログファイルを定期ポーリング（tail 相当）。新規行が正規表現にマッチでランブック起動
 - cron 式で時刻ベースの定期実行（HTTP 監視は `bash` + `curl` で書く）
+- CloudWatch Logs を `interval_sec` 間隔でポーリング（ローカル `file` トリガーと対称、AWS SDK は使うときだけ動的 import）
 - ランブックは `bash` ステップ
 - ファイル位置 / 発火時刻を `~/.mihari/state/` に保存
 

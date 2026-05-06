@@ -15,7 +15,12 @@ import { createExecutor, type Executor } from "../engine/executor.js";
 import { tick } from "../engine/dispatcher.js";
 import { FilePoller } from "../triggers/file.js";
 import { CronScheduler, cronRunbooks } from "../triggers/cron.js";
-import type { Runbook, TriggerEvent } from "../types/index.js";
+import {
+  CloudWatchLogsPoller,
+  createCloudWatchLogsApiFactory,
+  uniqueCloudWatchLogsTriggers,
+} from "../triggers/cloudwatch-logs.js";
+import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
 
@@ -103,11 +108,7 @@ program
       return;
     }
     for (const rb of ctx.runbooks) {
-      const triggerSummary =
-        rb.trigger.source === "file"
-          ? `file:${rb.trigger.path}`
-          : `cron:${rb.trigger.schedule}`;
-      console.log(`${rb.id}\t${triggerSummary}\t${rb.description ?? ""}`);
+      console.log(`${rb.id}\t${triggerSummary(rb.trigger)}\t${rb.description ?? ""}`);
     }
   });
 
@@ -171,10 +172,6 @@ program
       return;
     }
     for (const rb of ctx.runbooks) {
-      const triggerSummary =
-        rb.trigger.source === "file"
-          ? `file:${rb.trigger.path}`
-          : `cron:${rb.trigger.schedule}`;
       const [lastRun] = ctx.state.listRuns({ limit: 1, runbookId: rb.id });
       const lastAt = lastRun?.started_at ?? "(never)";
       const status = lastRun ? (lastRun.ok ? "ok" : "FAIL") : "-";
@@ -188,7 +185,9 @@ program
         }
       }
       const prefix = rb.enabled === false ? "[disabled] " : "";
-      console.log(`${prefix}${rb.id}\t${triggerSummary}\t${lastAt}\t${status}\t${next}`);
+      console.log(
+        `${prefix}${rb.id}\t${triggerSummary(rb.trigger)}\t${lastAt}\t${status}\t${next}`,
+      );
     }
   });
 
@@ -225,6 +224,13 @@ interface Ctx {
   executor: Executor;
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
+  cloudWatchLogsPollers: CloudWatchLogsPoller[];
+}
+
+function triggerSummary(t: Trigger): string {
+  if (t.source === "file") return `file:${t.path}`;
+  if (t.source === "cron") return `cron:${t.schedule}`;
+  return `cloudwatch_logs:${t.region}/${t.log_group}`;
 }
 
 async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
@@ -247,7 +253,24 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
   const executor = createExecutor(state);
   const pollers = uniqueTriggerPaths(runbooks).map((p) => new FilePoller(p, state));
   const cronSchedulers = cronRunbooks(runbooks).map((rb) => new CronScheduler(rb, state));
-  return { runbooks, state, executor, pollers, cronSchedulers };
+
+  const cwGroups = uniqueCloudWatchLogsTriggers(runbooks);
+  const cloudWatchLogsPollers: CloudWatchLogsPoller[] = [];
+  if (cwGroups.length > 0) {
+    const factory = await createCloudWatchLogsApiFactory();
+    for (const g of cwGroups) {
+      cloudWatchLogsPollers.push(
+        new CloudWatchLogsPoller(
+          { region: g.region, logGroup: g.logGroup },
+          g.intervalSec,
+          state,
+          factory.forRegion(g.region),
+        ),
+      );
+    }
+  }
+
+  return { runbooks, state, executor, pollers, cronSchedulers, cloudWatchLogsPollers };
 }
 
 function sleep(ms: number): Promise<void> {

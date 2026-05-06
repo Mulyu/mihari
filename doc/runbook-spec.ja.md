@@ -89,6 +89,34 @@ steps:
 
 stdout / stderr はログと履歴 JSONL に記録される。
 
+## 変数
+
+`{{ ... }}` でテンプレ展開。実体は環境変数経由で渡されるため、ログ行に注入文字列が混ざっても安全。
+
+| 変数 | `file` | `cron` |
+|------|--------|--------|
+| `{{ event.line }}` | マッチした行 | 空文字 |
+| `{{ event.path }}` | ログファイルパス | 空文字 |
+| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO8601) | 発火時刻 (ISO8601) |
+| `{{ env.<NAME> }}` | 環境変数 | 環境変数 |
+| `{{ steps.<id>.output }}` | `capture: true` の前段ステップの stdout（trailing newline 除去） | 同左 |
+
+`{{ ... }}` は `${VAR}` に展開されるだけなので、空白や改行を含みうる値は **必ずダブルクオートで囲む**：
+
+```yaml
+bash: |
+  echo "matched: {{ event.line }}"     # 良い
+  echo matched: {{ event.line }}       # 危険：IFS で単語分割される
+```
+
+`bash` ステップには下記の env も渡される（`{{ ... }}` は使わない）:
+
+| Env | 内容 |
+|---|---|
+| `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` | `event.*` テンプレと同じ値 |
+| `MIHARI_STEP_<ID>` | `capture: true` の前段ステップの stdout（id を大文字化、`-` は `_` に） |
+| `MIHARI_IDEMPOTENCY_KEY` | (runbook id, トリガーイベント) ペアに対して決定的な 12 文字 sha1 hex。`claude_agent` の組み込み規約も同じ値を使う |
+
 ### `claude`
 
 ```yaml
@@ -172,34 +200,6 @@ preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を agent に�
 | + push | + `Bash(git push:*)` |
 | + PR | + `Bash(gh pr create:*)` |
 
-## 変数
-
-`{{ ... }}` でテンプレ展開。実体は環境変数経由で渡されるため、ログ行に注入文字列が混ざっても安全。
-
-| 変数 | `file` | `cron` |
-|------|--------|--------|
-| `{{ event.line }}` | マッチした行 | 空文字 |
-| `{{ event.path }}` | ログファイルパス | 空文字 |
-| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO8601) | 発火時刻 (ISO8601) |
-| `{{ env.<NAME> }}` | 環境変数 | 環境変数 |
-| `{{ steps.<id>.output }}` | `capture: true` の前段ステップの stdout（trailing newline 除去） | 同左 |
-
-`{{ ... }}` は `${VAR}` に展開されるだけなので、空白や改行を含みうる値は **必ずダブルクオートで囲む**：
-
-```yaml
-bash: |
-  echo "matched: {{ event.line }}"     # 良い
-  echo matched: {{ event.line }}       # 危険：IFS で単語分割される
-```
-
-`bash` ステップには下記の env も渡される（`{{ ... }}` は使わない）:
-
-| Env | 内容 |
-|---|---|
-| `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` | `event.*` テンプレと同じ値 |
-| `MIHARI_STEP_<ID>` | `capture: true` の前段ステップの stdout（id を大文字化、`-` は `_` に） |
-| `MIHARI_IDEMPOTENCY_KEY` | (runbook id, トリガーイベント) ペアに対して決定的な 12 文字 sha1 hex。`claude_agent` の組み込み規約も同じ値を使う |
-
 ## バリデーション
 
 ```bash
@@ -216,4 +216,5 @@ mihari validate runbooks/                # ディレクトリ指定で全件
 - `api-health.yaml` — HTTP ヘルスチェック（cron + curl）
 - `backup-freshness.yaml` — バックアップ鮮度チェック（cron）
 - `k8s-pod-restart-summary.yaml` — Pod restart 数の定期集計（cron + capture）
+- `error-analysis.yaml` — エラーログを Claude で分析して改善提案する（file + claude ステップ）
 - `error-fix-pr.yaml` — Claude にバグ修正・push・PR 作成までやらせる（file + claude agent ステップ）

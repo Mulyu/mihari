@@ -1,7 +1,7 @@
 import { open, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { logger } from "../lib/logger.js";
-import type { PollerState, TriggerEvent } from "../types.js";
+import type { PollerState, TriggerEvent } from "../types/index.js";
 import type { StateStore } from "../state/store.js";
 
 const log = logger("trigger.file");

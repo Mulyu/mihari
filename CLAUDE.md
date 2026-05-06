@@ -29,9 +29,11 @@ mihari/
 ├── monban.yml                  # 構造リンタ設定
 ├── package.json
 ├── tsconfig.json
-├── src/
-│   ├── cli.ts                  # commander エントリ。bootstrap → dispatcher
-│   ├── types.ts                # Runbook / Trigger / TriggerEvent / StepContext / RunResult
+├── src/                        # 直下に .ts は置かない。すべてサブディレクトリ配下
+│   ├── cli/
+│   │   └── index.ts            # commander エントリ。bootstrap → dispatcher
+│   ├── types/
+│   │   └── index.ts            # Runbook / Trigger / TriggerEvent / StepContext / RunResult
 │   ├── engine/                 # オーケストレーション層
 │   │   ├── dispatcher.ts       # tick(): trigger を回して executor へ
 │   │   ├── executor.ts         # execute(runbook, event) ステップループ

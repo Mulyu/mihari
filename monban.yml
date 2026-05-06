@@ -11,9 +11,10 @@ doc:
     - path: "README.ja.md"
     - path: "CLAUDE.md"
 
-# 今回のリファクタで確立した src/ レイアウトを構造リンタで固定する。
-# 6 つのトップレベルディレクトリ（engine/ lib/ loader/ state/ steps/ triggers/）
-# 以外を src/ 直下に作らない。新規追加が必要なら direction を更新してから入れる。
+# src/ レイアウトを構造リンタで固定する。
+# 8 つのトップレベルディレクトリ（cli/ engine/ lib/ loader/ state/ steps/ triggers/ types/）
+# のみを src/ 直下に置く。直下に .ts ファイルは置かない（必ずディレクトリ配下）。
+# 新規ディレクトリの追加が必要なら direction を更新してから入れる。
 path:
   required:
     # ルートのメタデータ。揃っていないとリポジトリとして崩れている。
@@ -26,17 +27,17 @@ path:
         - "package.json"
         - "tsconfig.json"
         - "monban.yml"
-    # src/ 直下に直接置く 2 ファイルと 6 ディレクトリ。
+    # src/ 直下は 8 ディレクトリのみ。直下ファイルは置かない。
     - path: "src"
       files:
-        - "cli.ts"
-        - "types.ts"
+        - "cli/"
         - "engine/"
         - "lib/"
         - "loader/"
         - "state/"
         - "steps/"
         - "triggers/"
+        - "types/"
     # ユーザー向けドキュメントの日英ペア。
     - path: "doc"
       files:
@@ -60,13 +61,14 @@ path:
     - path: "doc/decisions/**"
       message: "decisions ログはリポジトリに置かない。判断は PR 説明と git log に残す"
 
-    # src/ 直下のディレクトリと .ts ファイルを許可リスト方式で固定。
-    - path: "src/!(engine|lib|loader|state|steps|triggers)/"
+    # src/ 直下のディレクトリは許可リスト方式で固定。
+    - path: "src/!(cli|engine|lib|loader|state|steps|triggers|types)/"
       type: directory
-      message: "src/ 直下のディレクトリは engine/ lib/ loader/ state/ steps/ triggers/ のみ。新設は CLAUDE.md とこの allowlist の更新が前提"
-    - path: "src/!(cli|types).ts"
+      message: "src/ 直下のディレクトリは cli/ engine/ lib/ loader/ state/ steps/ triggers/ types/ のみ。新設は CLAUDE.md とこの allowlist の更新が前提"
+    # src/ 直下に .ts ファイルを置かない。すべてサブディレクトリ配下に置く。
+    - path: "src/*.ts"
       type: file
-      message: "src/ 直下の .ts は cli.ts と types.ts のみ。それ以外は engine/ lib/ ... 配下に置く"
+      message: "src/ 直下に .ts を置かない。cli/ types/ など意味のあるディレクトリ配下に置く"
 
     # コーディングエージェントが作りがちな曖昧ディレクトリを禁止。
     - path: "src/**/utils/**"

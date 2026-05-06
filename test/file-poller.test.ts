@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decideStartOffset, splitCompleteLines } from "../src/triggers/file.js";
-import type { PollerState } from "../src/types.js";
+import type { PollerState } from "../src/types/index.js";
 
 function st(over: Partial<PollerState> = {}): PollerState {
   return {

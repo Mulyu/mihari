@@ -6,7 +6,7 @@ import {
   runBashStep,
   substituteTemplate,
 } from "../src/steps/bash-step.js";
-import type { BashStep, TriggerEvent } from "../src/types.js";
+import type { BashStep, TriggerEvent } from "../src/types/index.js";
 
 const step = (over: Partial<BashStep> = {}): BashStep => ({
   id: "s",

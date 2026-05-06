@@ -1,5 +1,5 @@
 import { logger } from "../lib/logger.js";
-import type { ClaudeAgentStep, StepContext, StepResult } from "../types.js";
+import type { ClaudeAgentStep, StepContext, StepResult } from "../types/index.js";
 import { captureStdout, substituteClaudeTemplate } from "./template.js";
 
 const log = logger("step.claude-agent");

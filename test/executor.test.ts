@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createExecutor } from "../src/engine/executor.js";
 import { StateStore } from "../src/state/store.js";
-import type { BashStep, Runbook, TriggerEvent } from "../src/types.js";
+import type { BashStep, Runbook, TriggerEvent } from "../src/types/index.js";
 
 
 let dir: string;

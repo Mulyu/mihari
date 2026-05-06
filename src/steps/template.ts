@@ -1,4 +1,4 @@
-import type { StepContext } from "../types.js";
+import type { StepContext } from "../types/index.js";
 
 // 全ステップで共通のテンプレ字句構造。
 // 拾うキー: event.line / event.path / event.timestamp / env.<NAME> / steps.<id>.output

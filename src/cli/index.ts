@@ -3,19 +3,19 @@ import { Command } from "commander";
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { Cron } from "croner";
-import { logger, setLogLevel } from "./lib/logger.js";
+import { logger, setLogLevel } from "../lib/logger.js";
 import {
   loadRunbookFile,
   loadRunbooks,
   RunbookValidationError,
-} from "./loader/index.js";
-import { uniqueTriggerPaths } from "./engine/matcher.js";
-import { StateStore, defaultStateDir } from "./state/store.js";
-import { createExecutor, type Executor } from "./engine/executor.js";
-import { tick } from "./engine/dispatcher.js";
-import { FilePoller } from "./triggers/file.js";
-import { CronScheduler, cronRunbooks } from "./triggers/cron.js";
-import type { Runbook, TriggerEvent } from "./types.js";
+} from "../loader/index.js";
+import { uniqueTriggerPaths } from "../engine/matcher.js";
+import { StateStore, defaultStateDir } from "../state/store.js";
+import { createExecutor, type Executor } from "../engine/executor.js";
+import { tick } from "../engine/dispatcher.js";
+import { FilePoller } from "../triggers/file.js";
+import { CronScheduler, cronRunbooks } from "../triggers/cron.js";
+import type { Runbook, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
 

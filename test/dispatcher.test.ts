@@ -4,7 +4,7 @@ import type { Executor } from "../src/engine/executor.js";
 import type { CronScheduler } from "../src/triggers/cron.js";
 import type { FilePoller } from "../src/triggers/file.js";
 import type { StateStore } from "../src/state/store.js";
-import type { Runbook, RunResult, TriggerEvent } from "../src/types.js";
+import type { Runbook, RunResult, TriggerEvent } from "../src/types/index.js";
 
 function fakeState(runs: RunResult[] = []): StateStore {
   return {

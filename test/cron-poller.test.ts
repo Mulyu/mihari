@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Cron } from "croner";
 import { decideCronFire } from "../src/triggers/cron.js";
-import type { TriggerState } from "../src/types.js";
+import type { TriggerState } from "../src/types/index.js";
 
 const schedule = (expr: string) => new Cron(expr);
 

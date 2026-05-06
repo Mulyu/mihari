@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeIdempotencyKey } from "../src/lib/idempotency.js";
-import type { TriggerEvent } from "../src/types.js";
+import type { TriggerEvent } from "../src/types/index.js";
 
 const fileEvent = (overrides: Partial<Extract<TriggerEvent, { type: "file" }>> = {}) =>
   ({

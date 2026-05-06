@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { logger } from "../lib/logger.js";
-import type { PollerState, RunResult, TriggerState } from "../types.js";
+import type { PollerState, RunResult, TriggerState } from "../types/index.js";
 
 const log = logger("state");
 

@@ -1,4 +1,4 @@
-import type { Runbook, Step } from "../types.js";
+import type { Runbook, Step } from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
 import {
   isObject,

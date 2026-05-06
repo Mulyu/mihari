@@ -4,7 +4,7 @@
   "description": "Local log file polling + bash runbook engine",
   "type": "module",
   "bin": {
-    "mihari": "dist/cli.js"
+    "mihari": "dist/cli/index.js"
   },
   "files": [
     "dist"
@@ -13,7 +13,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
+    "build": "tsc && chmod +x dist/cli/index.js",
     "check": "monban all",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

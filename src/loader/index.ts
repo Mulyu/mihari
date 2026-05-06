@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
-import type { Runbook } from "../types.js";
+import type { Runbook } from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
 import { validateRunbook } from "./runbook.js";
 

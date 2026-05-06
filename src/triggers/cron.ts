@@ -1,6 +1,6 @@
 import { Cron } from "croner";
 import { logger } from "../lib/logger.js";
-import type { CronTrigger, Runbook, TriggerEvent, TriggerState } from "../types.js";
+import type { CronTrigger, Runbook, TriggerEvent, TriggerState } from "../types/index.js";
 import type { StateStore } from "../state/store.js";
 
 const log = logger("trigger.cron");

@@ -122,12 +122,16 @@ stdout / stderr はログと履歴 JSONL に記録される。
   claude:
     prompt: |
       Error: {{ event.line }}
+      Context: {{ steps.get-context.output }}
+    prompt_file: prompts/analyze.md    # prompt と排他（ランブック YAML からの相対パス）
     system: You are a DevOps expert.   # optional
+    system_file: prompts/system.md     # system と排他（任意）
     model: claude-opus-4-7             # デフォ claude-opus-4-7
-    max_tokens: 1024                   # デフォ 1024。agent: true の場合は無視
+    max_tokens: 1024                   # デフォ 1024
   timeout_sec: 60
   on_error: stop
   capture: true
+  condition: on_failure
 ```
 
 | フィールド | 内容 |
@@ -136,6 +140,10 @@ stdout / stderr はログと履歴 JSONL に記録される。
 | `claude.system` / `system_file` | システムプロンプト本文 / ファイル（任意） |
 | `claude.model` | モデル名（デフォ `claude-opus-4-7`） |
 | `claude.max_tokens` | 出力トークン上限（単発モードのみ） |
+| `timeout_sec` | タイムアウト秒数（デフォ 60） |
+| `on_error` | `stop` / `continue`（デフォ `stop`） |
+| `capture` | `true` で API レスポンスを後続ステップから `{{ steps.<id>.output }}` で参照可能 |
+| `condition` | `always` / `on_success` / `on_failure`（bash ステップと同じ） |
 
 `ANTHROPIC_API_KEY` を環境変数で設定。`stop_reason: max_tokens` は失敗扱い。
 
@@ -243,5 +251,6 @@ mihari validate runbooks/                # ディレクトリ指定で全件
 - `api-health.yaml` — HTTP ヘルスチェック（cron + curl）
 - `backup-freshness.yaml` — バックアップ鮮度チェック（cron）
 - `k8s-pod-restart-summary.yaml` — Pod restart 数の定期集計（cron + capture）
+- `error-analysis.yaml` — Claude でエラーログを分析し修正案を提示（file + claude ステップ）
 - `error-fix-pr.yaml` — Claude にバグ修正・push・PR 作成までやらせる（file + claude agent ステップ）
 - `aws-cloudwatch-logs-error-alert.yaml` — CloudWatch Logs の ERROR を 1 件ごとに通知（aws_cloudwatch_logs）

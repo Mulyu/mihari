@@ -360,9 +360,5 @@ function validateDatadogMonitorsState(v: unknown): v is DatadogMonitorsPollerSta
     if (typeof value !== "string") return false;
     if (!(DATADOG_MONITOR_STATE_VALUES as readonly string[]).includes(value)) return false;
   }
-  if (o["next_page"] !== undefined) {
-    if (typeof o["next_page"] !== "number" || !Number.isFinite(o["next_page"])) return false;
-    if (o["next_page"] < 0) return false;
-  }
   return true;
 }

@@ -181,7 +181,8 @@ Executor:
 - 初回観測: `file` / `aws_cloudwatch_logs` と対称で履歴を遡らない
 - 状態遷移検出: 前回 state の `monitor_states[id]` と現在 `overall_state` を比較。差分があれば 1 件 event を emit。`transitions` フィルタは matcher 側で適用（同 key を異なる `transitions` で複数 runbook が購読できる）
 - 新規 monitor: 初回観測扱いで発火しない（次回 tick から差分検出対象に入る）
-- pagination: 1 tick あたり最大 50 hops（残りは次 tick）
+- state 書き戻し: 「前回 state ∪ 今回観測分」の merge。Datadog 上で削除された monitor は state にゴミとして残るが、観測されない以上 transition も emit されない（fail-open）
+- pagination: hop cap なし。`hasMore` が落ちるまで取り切る（listMonitors は monitor 定義一覧で O(monitor 数)、バーストがない前提）
 - 同じ `(site, monitor_tags)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され `interval_sec` は最小値が採用される
 - Datadog SDK は `datadog_monitors` ランブックがある時だけ動的 import。認証は環境変数 `DD_API_KEY` / `DD_APP_KEY` から読み SDK にそのまま渡す。mihari は YAML に認証フィールドを置かない（`site` のみ）
 

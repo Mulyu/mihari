@@ -175,14 +175,12 @@ export interface AwsCloudWatchLogsPollerState {
 // Datadog Monitor poller の cursor。
 // 観測した monitor id ごとの最終状態を保持し、次回 tick で差分を取って遷移を検出する。
 // `monitor_tags` を含むのは集約キーと state ファイル名の整合のため（監査用に冗長保存）。
-// `next_page` は前回 tick が hop cap で truncated されたときの再開地点。完全取得後は undefined。
-// 1 回の walk が複数 tick にまたがる前提で、`monitor_states` は常に merge する（古い entry は
-// drop しない＝削除検知は諦める。fail-open 寄りで欠落より安全側に倒す）。
+// `monitor_states` は「前回 state ∪ 今回観測分」の merge で書き戻す（削除検知は諦め、
+// fail-open 寄りで欠落より残す側に倒す）。
 export interface DatadogMonitorsPollerState {
   site: string;
   monitor_tags: string[];
   monitor_states: Record<string, DatadogMonitorState>;
-  next_page?: number;
   last_polled_at: string;
 }
 

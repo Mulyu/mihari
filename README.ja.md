@@ -11,7 +11,7 @@
 - ログファイルを定期ポーリング（tail 相当）。新規行が正規表現にマッチでランブック起動
 - cron 式で時刻ベースの定期実行（HTTP 監視は `bash` + `curl` で書く）
 - CloudWatch Logs を `interval_sec` 間隔でポーリング（ローカル `file` トリガーと対称、AWS SDK は使うときだけ動的 import）
-- ランブックは `bash` ステップ
+- ランブックは `bash` / `claude`（単発の Anthropic API 呼び出し）/ `claude_agent`（Agent SDK ループ、ファイル編集・Bash ツール経由で副作用あり）ステップで構成
 - ファイル位置 / 発火時刻を `~/.mihari/state/` に保存
 
 ## クイックスタート

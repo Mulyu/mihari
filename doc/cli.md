@@ -23,7 +23,7 @@ Logs are emitted as pino's structured JSON on stdout.
 
 ## `mihari daemon`
 
-Resident mode. Ticks file pollers and the cron scheduler at a fixed interval.
+Resident mode. Ticks file pollers, the cron scheduler, and CloudWatch Logs pollers at a fixed interval.
 
 ```bash
 mihari daemon --interval 30
@@ -64,7 +64,7 @@ Lists runbooks. Each row is `<id>\t<trigger>\t<description>`.
 mihari list
 ```
 
-The trigger column is rendered as `file:<path>` or `cron:<schedule>`.
+The trigger column is rendered as `file:<path>`, `cron:<schedule>`, or `aws_cloudwatch_logs:<region>|<log_group>`.
 
 ## `mihari status`
 
@@ -77,12 +77,13 @@ mihari status
 Sample output (tab-separated):
 
 ```
-disk-full-cleanup   file:/var/log/myapp.log   2026-04-29T02:11Z   ok    -
-api-health          cron:*/5 * * * *          2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
-backup-freshness    cron:0 9 * * *            2026-04-28T09:00Z   ok    2026-04-29T09:00Z
+disk-full-cleanup   file:/var/log/myapp.log                        2026-04-29T02:11Z   ok    -
+api-health          cron:*/5 * * * *                               2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
+backup-freshness    cron:0 9 * * *                                 2026-04-28T09:00Z   ok    2026-04-29T09:00Z
+lambda-error-alert  aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03:00Z   ok    -
 ```
 
-Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for `file` triggers.
+Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for `file` and `aws_cloudwatch_logs` triggers.
 
 ## `mihari validate <path>`
 

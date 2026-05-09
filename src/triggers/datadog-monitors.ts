@@ -69,6 +69,8 @@ export class DatadogMonitorsPoller {
     public readonly intervalSec: number,
     private readonly state: StateStore,
     private readonly api: DatadogMonitorsApi,
+    // テストで小さい値に上書き可能。本番は PAGINATION_HOP_CAP を使う。
+    private readonly hopCap: number = PAGINATION_HOP_CAP,
   ) {}
 
   async tick(now: Date = new Date(), dryRun = false): Promise<DatadogMonitorEvent[]> {
@@ -79,18 +81,15 @@ export class DatadogMonitorsPoller {
     const decision = decidePoll(prev, this.intervalSec, now);
     if (decision.action === "skip") return [];
 
-    const monitors = await this.fetchAllMonitors();
+    // 前回 tick が hop cap で truncated されていれば続きの page から再開する。
+    const startPage = prev?.next_page ?? 0;
+    const fetched = await this.fetchPages(startPage);
 
     if (decision.action === "seed") {
       if (!dryRun) {
-        await this.state.saveDatadogMonitorsState({
-          site: this.key.site,
-          monitor_tags: this.key.monitorTags,
-          monitor_states: Object.fromEntries(
-            monitors.map((m) => [m.id, m.overall_state]),
-          ),
-          last_polled_at: now.toISOString(),
-        });
+        await this.state.saveDatadogMonitorsState(
+          this.buildState(prev, fetched, now, /*emitEvents*/ false),
+        );
       }
       return [];
     }
@@ -99,9 +98,7 @@ export class DatadogMonitorsPoller {
     // transitions による絞り込みは matcher 側で runbook.trigger.transitions に応じて行う
     // （同じ (site, monitor_tags) を購読する複数 runbook が異なる transitions を持てるよう）。
     const events: DatadogMonitorEvent[] = [];
-    const newStates: Record<string, DatadogMonitorState> = {};
-    for (const m of monitors) {
-      newStates[m.id] = m.overall_state;
+    for (const m of fetched.monitors) {
       const fromState = prev?.monitor_states[m.id];
       if (fromState !== undefined && fromState !== m.overall_state) {
         events.push({
@@ -118,20 +115,43 @@ export class DatadogMonitorsPoller {
     }
 
     if (!dryRun) {
-      await this.state.saveDatadogMonitorsState({
-        site: this.key.site,
-        monitor_tags: this.key.monitorTags,
-        monitor_states: newStates,
-        last_polled_at: now.toISOString(),
-      });
+      await this.state.saveDatadogMonitorsState(
+        this.buildState(prev, fetched, now, /*emitEvents*/ true),
+      );
     }
 
     return events;
   }
 
-  private async fetchAllMonitors(): Promise<RawMonitor[]> {
+  // monitor_states は常に「前回 state ∪ 今回観測分」の merge。1 回の walk が複数 tick に
+  // またがる前提で、今回見えなかった monitor は前回 state から落とさない（部分取得時の
+  // 過去 state 喪失を防ぐ）。完全取得（!truncated）時も merge を維持する代わり、削除検知は
+  // 諦める：mihari は state を欠落させるより残すほうを選ぶ（fail-open 方針と整合）。
+  private buildState(
+    prev: DatadogMonitorsPollerState | null,
+    fetched: FetchResult,
+    now: Date,
+    _emitEvents: boolean,
+  ): DatadogMonitorsPollerState {
+    const monitor_states: Record<string, DatadogMonitorState> = {
+      ...(prev?.monitor_states ?? {}),
+    };
+    for (const m of fetched.monitors) {
+      monitor_states[m.id] = m.overall_state;
+    }
+    const next: DatadogMonitorsPollerState = {
+      site: this.key.site,
+      monitor_tags: this.key.monitorTags,
+      monitor_states,
+      last_polled_at: now.toISOString(),
+    };
+    if (fetched.truncated) next.next_page = fetched.nextPage;
+    return next;
+  }
+
+  private async fetchPages(startPage: number): Promise<FetchResult> {
     const all: RawMonitor[] = [];
-    let page = 0;
+    let page = startPage;
     let hops = 0;
     const tags =
       this.key.monitorTags.length > 0 ? this.key.monitorTags.join(",") : undefined;
@@ -144,18 +164,26 @@ export class DatadogMonitorsPoller {
       });
       all.push(...res.monitors);
       hops++;
-      if (!res.hasMore) break;
-      if (hops >= PAGINATION_HOP_CAP) {
-        log.warn(
-          { site: this.key.site, hops },
-          "pagination cap reached, will resume next tick",
-        );
-        break;
-      }
       page++;
+      if (!res.hasMore) {
+        return { monitors: all, truncated: false, nextPage: 0 };
+      }
+      if (hops >= this.hopCap) {
+        log.warn(
+          { site: this.key.site, hops, nextPage: page },
+          "pagination cap reached, will resume from next_page on next tick",
+        );
+        return { monitors: all, truncated: true, nextPage: page };
+      }
     }
-    return all;
   }
+}
+
+interface FetchResult {
+  monitors: RawMonitor[];
+  truncated: boolean;
+  // truncated=true のとき次回再開する page。truncated=false のときは 0 にリセット。
+  nextPage: number;
 }
 
 type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };

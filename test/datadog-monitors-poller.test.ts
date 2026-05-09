@@ -212,6 +212,68 @@ describe("DatadogMonitorsPoller.tick", () => {
     expect(state.saved).toHaveLength(0);
   });
 
+  it("merges prev state with newly fetched monitors instead of overwriting", async () => {
+    // 過去 walk で観測した既知 monitor が、今回 tick で fetch されなくても drop されないこと。
+    const state = fakeState({
+      site: "datadoghq.com",
+      monitor_tags: ["env:prod"],
+      monitor_states: { "1": "ok", "2": "ok" },
+      last_polled_at: "2026-05-09T12:00:00Z",
+    });
+    const api = fakeApi([
+      {
+        monitors: [{ id: "1", name: "m1", overall_state: "alert" }],
+        hasMore: false,
+      },
+    ]);
+    const poller = new DatadogMonitorsPoller(KEY, 60, state, api);
+    const events = await poller.tick(new Date("2026-05-09T12:01:00Z"));
+    expect(events.map((e) => e.monitor_id)).toEqual(["1"]);
+    expect(state.saved[0]?.monitor_states).toEqual({ "1": "alert", "2": "ok" });
+    expect(state.saved[0]?.next_page).toBeUndefined();
+  });
+
+  it("persists next_page when hop cap is reached and resumes from there next tick", async () => {
+    const state = fakeState({
+      site: "datadoghq.com",
+      monitor_tags: ["env:prod"],
+      monitor_states: { a: "ok" },
+      last_polled_at: "2026-05-09T12:00:00Z",
+    });
+    // hop cap = 2 で 2 ページ分続けて hasMore=true を返す → truncated=true で打ち切り
+    const api = fakeApi([
+      { monitors: [{ id: "p0", name: "m", overall_state: "alert" }], hasMore: true },
+      { monitors: [{ id: "p1", name: "m", overall_state: "alert" }], hasMore: true },
+    ]);
+    const poller = new DatadogMonitorsPoller(KEY, 60, state, api, 2);
+    await poller.tick(new Date("2026-05-09T12:01:00Z"));
+    expect(api.calls.map((c) => c.page)).toEqual([0, 1]);
+    // truncated 時は前回 state がマージされる
+    expect(state.saved[0]?.monitor_states).toEqual({
+      a: "ok",
+      p0: "alert",
+      p1: "alert",
+    });
+    // 次回再開地点が保存される
+    expect(state.saved[0]?.next_page).toBe(2);
+  });
+
+  it("resumes from prev.next_page on the next tick", async () => {
+    const state = fakeState({
+      site: "datadoghq.com",
+      monitor_tags: ["env:prod"],
+      monitor_states: { a: "ok" },
+      next_page: 5,
+      last_polled_at: "2026-05-09T12:00:00Z",
+    });
+    const api = fakeApi([{ monitors: [], hasMore: false }]);
+    const poller = new DatadogMonitorsPoller(KEY, 60, state, api);
+    await poller.tick(new Date("2026-05-09T12:01:00Z"));
+    expect(api.calls[0]?.page).toBe(5);
+    // 完全取得（hasMore=false）で next_page はクリアされる
+    expect(state.saved[0]?.next_page).toBeUndefined();
+  });
+
   it("passes monitorTags to API as comma-separated string", async () => {
     const state = fakeState({
       site: "datadoghq.com",

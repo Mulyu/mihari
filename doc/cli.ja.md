@@ -23,7 +23,7 @@ mihari <command> [options]
 
 ## `mihari daemon`
 
-常駐モード。ファイルポーラーと cron スケジューラを定期間隔でティックする。
+常駐モード。ファイルポーラー、cron スケジューラ、CloudWatch Logs ポーラーを定期間隔でティックする。
 
 ```bash
 mihari daemon --interval 30
@@ -64,7 +64,7 @@ mihari run disk-full-cleanup
 mihari list
 ```
 
-トリガー表記は `file:<path>` または `cron:<schedule>`。
+トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` のいずれか。
 
 ## `mihari status`
 
@@ -77,12 +77,13 @@ mihari status
 出力例（タブ区切り）：
 
 ```
-disk-full-cleanup   file:/var/log/myapp.log   2026-04-29T02:11Z   ok    -
-api-health          cron:*/5 * * * *          2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
-backup-freshness    cron:0 9 * * *            2026-04-28T09:00Z   ok    2026-04-29T09:00Z
+disk-full-cleanup   file:/var/log/myapp.log                        2026-04-29T02:11Z   ok    -
+api-health          cron:*/5 * * * *                               2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
+backup-freshness    cron:0 9 * * *                                 2026-04-28T09:00Z   ok    2026-04-29T09:00Z
+lambda-error-alert  aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03:00Z   ok    -
 ```
 
-`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` トリガーでは常に `-`。
+`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` および `aws_cloudwatch_logs` トリガーでは常に `-`。
 
 ## `mihari validate <path>`
 

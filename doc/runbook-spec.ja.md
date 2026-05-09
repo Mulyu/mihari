@@ -11,7 +11,7 @@ id: kebab-case-id          # 必須。`[a-z0-9][a-z0-9-]*`
 description: ...           # 任意
 enabled: true              # 任意。false にすると daemon/poll で発火しない（デフォルト true）
 cooldown_sec: 300          # 任意。前回発火から指定秒以内は再発火しない
-trigger: ...               # 必須。file / cron / aws_cloudwatch_logs のいずれか
+trigger: ...               # 必須。file / cron / aws_cloudwatch_logs / datadog_monitors のいずれか
 steps: [ ... ]             # 必須。1件以上
 ```
 
@@ -72,6 +72,35 @@ cursor は `~/.mihari/state/aws-cloudwatch-logs/<sha1(region|log_group)>.json` �
 認証は AWS SDK 標準チェーン（環境変数 / `~/.aws/credentials` / IAM ロール）に完全委譲。mihari は認証フィールドを一切公開しない。SDK は `aws_cloudwatch_logs` トリガーが 1 つでも存在するときだけ動的 import される。
 
 同じ `(region, log_group)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され、`interval_sec` は購読側の最小値が採用される。
+
+### `datadog_monitors`
+
+```yaml
+trigger:
+  source: datadog_monitors
+  site: datadoghq.com
+  monitor_tags:                # 任意。AND フィルタ。Datadog SDK の monitorTags にそのまま渡す
+    - "env:prod"
+  transitions:                 # 任意。発火する到達状態のリスト。デフォ ["alert"]
+    - alert
+    - warn
+  interval_sec: 60
+```
+
+| フィールド | 内容 |
+|----------|------|
+| `site` | Datadog のサイト（`datadoghq.com` / `datadoghq.eu` / `us3.datadoghq.com` 等）。SDK の region 解決には頼らず明示必須（state key の同一性も担保） |
+| `monitor_tags` | 任意。タグフィルタの配列（`["env:prod", "service:web"]`）。SDK へはカンマ区切り `monitorTags` として渡す。省略時はサイト上の全 monitor が対象 |
+| `transitions` | 任意。発火する到達状態の配列。許可値: `alert` / `warn` / `no_data` / `ok` / `skipped` / `ignored` / `unknown`。デフォ `["alert"]` |
+| `interval_sec` | ポーリング間隔（秒）。Datadog API のレート枠を意識して必須化 |
+
+状態遷移（`ok -> alert` など）1 件ごとに 1 回発火する。セマンティクスは `aws_cloudwatch_logs` と対称で、初回観測では履歴を遡らず、cursor（monitor ごとの現在 `overall_state`）をシードするだけ。
+
+state は `~/.mihari/state/datadog-monitors/<sha1(site|sorted-monitor_tags)>.json` に保存。書き込み失敗は fail-open（warn ログのみで処理続行）。
+
+認証は環境変数 `DD_API_KEY` / `DD_APP_KEY` から読み、SDK にそのまま渡す。mihari は YAML に認証フィールドを置かない。SDK は `datadog_monitors` トリガーが 1 つでも存在するときだけ動的 import される。
+
+同じ `(site, monitor_tags)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され、`interval_sec` は購読側の最小値が採用される。`transitions` の絞り込みは matcher 側で runbook ごとに独立に適用する。
 
 ## ステップ
 
@@ -210,14 +239,18 @@ preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を agent に�
 
 `{{ ... }}` でテンプレ展開。実体は環境変数経由で渡されるため、ログ行に注入文字列が混ざっても安全。
 
-| 変数 | `file` | `cron` | `aws_cloudwatch_logs` |
-|------|--------|--------|---|
-| `{{ event.line }}` | マッチした行 | 空文字 | event の message |
-| `{{ event.path }}` | ログファイルパス | 空文字 | log group 名 |
-| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO8601) | 発火時刻 (ISO8601) | event の timestamp (ISO8601) |
-| `{{ event.log_stream }}` | 空文字 | 空文字 | log stream 名 |
-| `{{ env.<NAME> }}` | 環境変数 | 環境変数 | 環境変数 |
-| `{{ steps.<id>.output }}` | `capture: true` の前段ステップの stdout（trailing newline 除去） | 同左 | 同左 |
+| 変数 | `file` | `cron` | `aws_cloudwatch_logs` | `datadog_monitors` |
+|------|--------|--------|---|---|
+| `{{ event.line }}` | マッチした行 | 空文字 | event の message | 空文字 |
+| `{{ event.path }}` | ログファイルパス | 空文字 | log group 名 | 空文字 |
+| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO8601) | 発火時刻 (ISO8601) | event の timestamp (ISO8601) | 遷移を観測した時刻 (ISO8601) |
+| `{{ event.log_stream }}` | 空文字 | 空文字 | log stream 名 | 空文字 |
+| `{{ event.monitor_id }}` | 空文字 | 空文字 | 空文字 | Datadog monitor id |
+| `{{ event.monitor_name }}` | 空文字 | 空文字 | 空文字 | Datadog monitor 名 |
+| `{{ event.from_state }}` | 空文字 | 空文字 | 空文字 | 遷移前の状態 |
+| `{{ event.to_state }}` | 空文字 | 空文字 | 空文字 | 遷移後の状態 |
+| `{{ env.<NAME> }}` | 環境変数 | 環境変数 | 環境変数 | 環境変数 |
+| `{{ steps.<id>.output }}` | `capture: true` の前段ステップの stdout（trailing newline 除去） | 同左 | 同左 | 同左 |
 
 `{{ ... }}` は `${VAR}` に展開されるだけなので、空白や改行を含みうる値は **必ずダブルクオートで囲む**：
 
@@ -232,6 +265,7 @@ bash: |
 | Env | 内容 |
 |---|---|
 | `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` / `MIHARI_EVENT_LOG_STREAM` | `event.*` テンプレと同じ値 |
+| `MIHARI_EVENT_MONITOR_ID` / `MIHARI_EVENT_MONITOR_NAME` / `MIHARI_EVENT_FROM_STATE` / `MIHARI_EVENT_TO_STATE` | `event.*` テンプレと同じ値（`datadog_monitors` トリガーのみ値が入る） |
 | `MIHARI_STEP_<ID>` | `capture: true` の前段ステップの stdout（id を大文字化、`-` は `_` に） |
 | `MIHARI_IDEMPOTENCY_KEY` | (runbook id, トリガーイベント) ペアに対して決定的な 12 文字 sha1 hex。`claude_agent` の組み込み規約も同じ値を使う |
 
@@ -254,3 +288,4 @@ mihari validate runbooks/                # ディレクトリ指定で全件
 - `error-analysis.yaml` — Claude でエラーログを分析し修正案を提示（file + claude ステップ）
 - `error-fix-pr.yaml` — Claude にバグ修正・push・PR 作成までやらせる（file + claude agent ステップ）
 - `aws-cloudwatch-logs-error-alert.yaml` — CloudWatch Logs の ERROR を 1 件ごとに通知（aws_cloudwatch_logs）
+- `datadog-monitor-alert.yaml` — Datadog Monitor の `alert` 遷移を通知（datadog_monitors）

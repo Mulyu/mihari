@@ -1,0 +1,30 @@
+id: dd-monitor-alert
+description: Datadog Monitor が ok/warn/no_data から alert に遷移したら Slack に通知
+
+# 認証は環境変数 DD_API_KEY / DD_APP_KEY に委譲する。mihari は YAML に
+# 認証フィールドを置かない（aws_cloudwatch_logs が AWS SDK 標準チェーンに
+# 委譲するのと同じ思想）。site / monitor_tags は state key の同一性を担保するため
+# トリガー側で明示する。
+trigger:
+  source: datadog_monitors
+  site: datadoghq.com
+  monitor_tags:
+    - "env:prod"
+  transitions:
+    - alert
+  interval_sec: 60
+
+# 同じ monitor が立て続けに alert に入っても通知は 5 分に 1 回までに絞る。
+cooldown_sec: 300
+
+steps:
+  - id: notify
+    bash: |
+      # 値はクオートして渡す（IFS 分割を避ける）。
+      curl -fsS -X POST -H 'Content-Type: application/json' \
+        -d "{\"text\":\":rotating_light: {{ event.monitor_name }}: {{ event.from_state }} -> {{ event.to_state }} (id={{ event.monitor_id }})\"}" \
+        "$SLACK_WEBHOOK_URL"
+    env:
+      SLACK_WEBHOOK_URL: https://hooks.slack.com/services/REPLACE/ME
+    timeout_sec: 10
+    on_error: continue

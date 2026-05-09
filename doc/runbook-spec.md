@@ -11,7 +11,7 @@ id: kebab-case-id          # Required. Must match `[a-z0-9][a-z0-9-]*`.
 description: ...           # Optional.
 enabled: true              # Optional. When false, daemon/poll skips firing (default true).
 cooldown_sec: 300          # Optional. Suppress refiring within N seconds of the last fire.
-trigger: ...               # Required. file, cron, or aws_cloudwatch_logs.
+trigger: ...               # Required. file, cron, aws_cloudwatch_logs, or datadog_monitors.
 steps: [ ... ]             # Required. At least one entry.
 ```
 
@@ -73,6 +73,35 @@ Authentication is delegated entirely to the AWS SDK default credential chain (en
 
 If two runbooks subscribe to the same `(region, log_group)` they share one poller; the effective `interval_sec` is the minimum of the subscribers.
 
+### `datadog_monitors`
+
+```yaml
+trigger:
+  source: datadog_monitors
+  site: datadoghq.com
+  monitor_tags:                # optional, AND filter passed to Datadog SDK monitorTags
+    - "env:prod"
+  transitions:                 # optional, "to" states to fire on. Default ["alert"]
+    - alert
+    - warn
+  interval_sec: 60
+```
+
+| Field | Purpose |
+|----------|------|
+| `site` | Datadog site (`datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com`, etc.). Required for unambiguous SDK config and state-key uniqueness |
+| `monitor_tags` | Optional list of tag filters (`["env:prod", "service:web"]`). Forwarded to the SDK as a comma-separated `monitorTags`. Omit to observe every monitor on the site |
+| `transitions` | Optional list of "to" states to fire on. Allowed: `alert` / `warn` / `no_data` / `ok` / `skipped` / `ignored` / `unknown`. Default `["alert"]` |
+| `interval_sec` | Polling interval in seconds. Required (Datadog API calls cost rate budget — make this explicit) |
+
+The trigger fires once per detected state transition (e.g. `ok -> alert`). Semantics mirror `aws_cloudwatch_logs`: on first observation no historical events are emitted; the cursor (current per-monitor `overall_state` map) is just seeded.
+
+State (the per-monitor state map) lives at `~/.mihari/state/datadog-monitors/<sha1(site|sorted-monitor_tags)>.json`. Cursor write failure is fail-open (warn log, processing continues).
+
+Authentication: mihari reads `DD_API_KEY` and `DD_APP_KEY` from the environment and passes them straight to the SDK. mihari exposes no auth fields. The SDK is dynamically imported only when at least one runbook uses this trigger.
+
+If two runbooks subscribe to the same `(site, monitor_tags)` they share one poller; the effective `interval_sec` is the minimum of the subscribers. Different `transitions` filters across those subscribers are honored independently in the matcher.
+
 ## Steps
 
 ### `bash`
@@ -119,14 +148,18 @@ stdout / stderr are recorded in the logs and the history JSONL.
 
 Templates are expanded with `{{ ... }}`. Values are passed in as environment variables, so injection text mixed into log lines is safe.
 
-| Variable | `file` | `cron` | `aws_cloudwatch_logs` |
-|------|--------|--------|---|
-| `{{ event.line }}` | The matched line | Empty string | The event message |
-| `{{ event.path }}` | Path to the log file | Empty string | The log group name |
-| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing (ISO 8601) | Event timestamp (ISO 8601) |
-| `{{ event.log_stream }}` | Empty string | Empty string | The log stream name |
-| `{{ env.<NAME> }}` | Environment variable | Environment variable | Environment variable |
-| `{{ steps.<id>.output }}` | stdout of an earlier step with `capture: true` (trailing newline stripped) | same | same |
+| Variable | `file` | `cron` | `aws_cloudwatch_logs` | `datadog_monitors` |
+|------|--------|--------|---|---|
+| `{{ event.line }}` | The matched line | Empty string | The event message | Empty string |
+| `{{ event.path }}` | Path to the log file | Empty string | The log group name | Empty string |
+| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing (ISO 8601) | Event timestamp (ISO 8601) | Time the transition was observed (ISO 8601) |
+| `{{ event.log_stream }}` | Empty string | Empty string | The log stream name | Empty string |
+| `{{ event.monitor_id }}` | Empty string | Empty string | Empty string | Datadog monitor id |
+| `{{ event.monitor_name }}` | Empty string | Empty string | Empty string | Datadog monitor name |
+| `{{ event.from_state }}` | Empty string | Empty string | Empty string | Previous monitor state |
+| `{{ event.to_state }}` | Empty string | Empty string | Empty string | Current monitor state |
+| `{{ env.<NAME> }}` | Environment variable | Environment variable | Environment variable | Environment variable |
+| `{{ steps.<id>.output }}` | stdout of an earlier step with `capture: true` (trailing newline stripped) | same | same | same |
 
 `{{ ... }}` simply expands to `${VAR}`, so values that may contain spaces or newlines **must be double-quoted**:
 
@@ -141,6 +174,7 @@ bash: |
 | Env var | Meaning |
 |---|---|
 | `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` / `MIHARI_EVENT_LOG_STREAM` | Same as the `event.*` template variables |
+| `MIHARI_EVENT_MONITOR_ID` / `MIHARI_EVENT_MONITOR_NAME` / `MIHARI_EVENT_FROM_STATE` / `MIHARI_EVENT_TO_STATE` | Same as the `event.*` template variables (populated only on `datadog_monitors` triggers) |
 | `MIHARI_STEP_<ID>` | stdout of an earlier `capture: true` step (id uppercased, `-` → `_`) |
 | `MIHARI_IDEMPOTENCY_KEY` | 12-char sha1 hex deterministic for the (runbook id, trigger event) pair. See `claude_agent` for how it is used by the built-in idempotency conventions. |
 
@@ -256,3 +290,4 @@ See `runbooks/examples/`:
 - `error-analysis.yaml` — Analyzes error logs with Claude and suggests remediation (file + claude step)
 - `error-fix-pr.yaml` — Lets Claude fix the bug, push a branch, and open a PR (file + claude agent step)
 - `aws-cloudwatch-logs-error-alert.yaml` — Alerts on CloudWatch Logs ERROR events (aws_cloudwatch_logs)
+- `datadog-monitor-alert.yaml` — Notifies on Datadog Monitor transitions into `alert` (datadog_monitors)

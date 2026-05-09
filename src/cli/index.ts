@@ -20,6 +20,11 @@ import {
   createAwsCloudWatchLogsApiFactory,
   uniqueAwsCloudWatchLogsTriggers,
 } from "../triggers/aws-cloudwatch-logs.js";
+import {
+  DatadogMonitorsPoller,
+  createDatadogMonitorsApiFactory,
+  uniqueDatadogMonitorsTriggers,
+} from "../triggers/datadog-monitors.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -225,12 +230,17 @@ interface Ctx {
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
   awsCloudWatchLogsPollers: AwsCloudWatchLogsPoller[];
+  datadogMonitorsPollers: DatadogMonitorsPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
   if (t.source === "file") return `file:${t.path}`;
   if (t.source === "cron") return `cron:${t.schedule}`;
-  return `aws_cloudwatch_logs:${t.region}/${t.log_group}`;
+  if (t.source === "aws_cloudwatch_logs") {
+    return `aws_cloudwatch_logs:${t.region}/${t.log_group}`;
+  }
+  const tags = (t.monitor_tags ?? []).join(",");
+  return `datadog_monitors:${t.site}|${tags}`;
 }
 
 async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
@@ -270,7 +280,31 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
-  return { runbooks, state, executor, pollers, cronSchedulers, awsCloudWatchLogsPollers };
+  const ddGroups = uniqueDatadogMonitorsTriggers(runbooks);
+  const datadogMonitorsPollers: DatadogMonitorsPoller[] = [];
+  if (ddGroups.length > 0) {
+    const factory = await createDatadogMonitorsApiFactory();
+    for (const g of ddGroups) {
+      datadogMonitorsPollers.push(
+        new DatadogMonitorsPoller(
+          { site: g.site, monitorTags: g.monitorTags },
+          g.intervalSec,
+          state,
+          factory.forSite(g.site),
+        ),
+      );
+    }
+  }
+
+  return {
+    runbooks,
+    state,
+    executor,
+    pollers,
+    cronSchedulers,
+    awsCloudWatchLogsPollers,
+    datadogMonitorsPollers,
+  };
 }
 
 function sleep(ms: number): Promise<void> {

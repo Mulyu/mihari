@@ -1,7 +1,17 @@
 import { Cron } from "croner";
-import type { Trigger } from "../types/index.js";
+import type { DatadogMonitorState, Trigger } from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
 import { isObject, mustString, optionalNumber, optionalString } from "./primitives.js";
+
+const DATADOG_MONITOR_STATES: readonly DatadogMonitorState[] = [
+  "alert",
+  "warn",
+  "no_data",
+  "ok",
+  "skipped",
+  "ignored",
+  "unknown",
+];
 
 export function validateTrigger(raw: unknown, file: string): Trigger {
   if (!isObject(raw)) throw new RunbookValidationError(file, "trigger must be a mapping");
@@ -64,8 +74,75 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     if (pattern !== undefined) t.pattern = pattern;
     return t;
   }
+  if (source === "datadog_monitors") {
+    const site = mustString(raw, "site", file, "trigger.site");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const monitor_tags = parseStringArray(raw, "monitor_tags", file, "trigger.monitor_tags");
+    const transitions = parseTransitions(raw, file);
+    const t: Trigger = {
+      source: "datadog_monitors",
+      site,
+      transitions,
+      interval_sec,
+    };
+    if (monitor_tags !== undefined) t.monitor_tags = monitor_tags;
+    return t;
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", or "aws_cloudwatch_logs" (got: ${source})`,
+    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", or "datadog_monitors" (got: ${source})`,
   );
+}
+
+function parseStringArray(
+  raw: Record<string, unknown>,
+  key: string,
+  file: string,
+  ctx: string,
+): string[] | undefined {
+  const v = raw[key];
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v)) {
+    throw new RunbookValidationError(file, `${ctx} must be an array of strings`);
+  }
+  for (const item of v) {
+    if (typeof item !== "string" || item.length === 0) {
+      throw new RunbookValidationError(file, `${ctx} entries must be non-empty strings`);
+    }
+  }
+  return v.map((s) => s as string);
+}
+
+function parseTransitions(raw: Record<string, unknown>, file: string): DatadogMonitorState[] {
+  const v = raw["transitions"];
+  if (v === undefined) return ["alert"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.transitions must be a non-empty array of state literals",
+    );
+  }
+  const out: DatadogMonitorState[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !isDatadogMonitorState(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.transitions entries must be one of: ${DATADOG_MONITOR_STATES.join(", ")} (got: ${String(
+          item,
+        )})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function isDatadogMonitorState(s: string): s is DatadogMonitorState {
+  return (DATADOG_MONITOR_STATES as readonly string[]).includes(s);
 }

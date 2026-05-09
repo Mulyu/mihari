@@ -32,6 +32,19 @@ export function buildEnv(
     env["MIHARI_EVENT_PATH"] = "";
     env["MIHARI_EVENT_LOG_STREAM"] = "";
   }
+  // datadog_monitor は line/path/log_stream に対応する自然な値がないため、固有 env を別途
+  // 渡してランブック側でパース不要にする（aws_cloudwatch_logs の log_stream と同じ思想）。
+  if (ctx.event.type === "datadog_monitor") {
+    env["MIHARI_EVENT_MONITOR_ID"] = ctx.event.monitor_id;
+    env["MIHARI_EVENT_MONITOR_NAME"] = ctx.event.monitor_name;
+    env["MIHARI_EVENT_FROM_STATE"] = ctx.event.from_state;
+    env["MIHARI_EVENT_TO_STATE"] = ctx.event.to_state;
+  } else {
+    env["MIHARI_EVENT_MONITOR_ID"] = "";
+    env["MIHARI_EVENT_MONITOR_NAME"] = "";
+    env["MIHARI_EVENT_FROM_STATE"] = "";
+    env["MIHARI_EVENT_TO_STATE"] = "";
+  }
   env["MIHARI_EVENT_TIMESTAMP"] = ctx.event.timestamp;
   env["MIHARI_IDEMPOTENCY_KEY"] = ctx.idempotencyKey;
   for (const [stepId, value] of Object.entries(ctx.capturedSteps)) {

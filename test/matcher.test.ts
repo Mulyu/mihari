@@ -6,12 +6,13 @@ import {
   uniqueTriggerPaths,
 } from "../src/engine/matcher.js";
 import type { DatadogMonitorState, Runbook, TriggerEvent } from "../src/types/index.js";
+import { fakeAgent } from "./_fixtures.js";
 
 function fileRb(id: string, path: string, pattern: RegExp): Runbook {
   return {
     id,
     trigger: { source: "file", path, pattern },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
   };
 }
@@ -20,7 +21,7 @@ function cronRb(id: string, schedule: string): Runbook {
   return {
     id,
     trigger: { source: "cron", schedule },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
   };
 }
@@ -73,7 +74,7 @@ function cwRb(
     trigger: pattern
       ? { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60, pattern }
       : { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60 },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
   };
 }
@@ -140,7 +141,7 @@ function ddRb(
   return {
     id,
     trigger,
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
   };
 }

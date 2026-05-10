@@ -1,12 +1,12 @@
 export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger | DatadogMonitorsTrigger;
 
-export type Step = BashStep | ClaudeStep | ClaudeAgentStep;
+export type Provider = "datadog" | "jira" | "slack";
 
 export interface Runbook {
   id: string;
   description?: string;
   trigger: Trigger;
-  steps: Step[];
+  agent: Agent;
   sourcePath: string;
   enabled?: boolean;
   cooldown_sec?: number;
@@ -23,9 +23,6 @@ export interface CronTrigger {
   schedule: string;
 }
 
-// CloudWatch Logs を `file` トリガーと対称な「リモートのログストリーム」として扱う。
-// pattern は省略可。省略時は全 event がマッチ。
-// region は明示必須（SDK の region 解決には頼らず、state key の同一性も担保する）。
 export interface AwsCloudWatchLogsTrigger {
   source: "aws_cloudwatch_logs";
   region: string;
@@ -34,10 +31,6 @@ export interface AwsCloudWatchLogsTrigger {
   interval_sec: number;
 }
 
-// Datadog Monitor の状態遷移をポーリングで観測するトリガー。
-// site は明示必須（datadoghq.com / datadoghq.eu / us3.datadoghq.com 等。state key の同一性を担保）。
-// monitor_tags は Datadog SDK の monitorTags フィルタへ渡すタグ配列（任意。空なら全 monitor が対象）。
-// transitions は拾う遷移の "to" 状態のリスト（デフォルト ["alert"]）。状態語彙は loader 側で固定する。
 export type DatadogMonitorState =
   | "alert"
   | "warn"
@@ -55,61 +48,19 @@ export interface DatadogMonitorsTrigger {
   interval_sec: number;
 }
 
-export interface BashStep {
-  id: string;
-  bash: string;
+export interface Agent {
+  prompt: string;
+  system?: string;
+  model: string;
+  allowed_tools: string[];
+  permission_mode: "strict" | "bypass";
+  max_turns: number;
   timeout_sec: number;
-  on_error: "stop" | "continue";
-  env: Record<string, string>;
-  capture: boolean;
-  condition?: "always" | "on_success" | "on_failure";
+  conventions: boolean;
+  cwd?: string;
+  providers: Provider[];
 }
 
-// 単発の messages.create 呼び出し。副作用なし。テキストを返すだけ。
-export interface ClaudeStep {
-  id: string;
-  claude: {
-    prompt: string;
-    system?: string;
-    model: string;
-    max_tokens: number;
-  };
-  timeout_sec: number;
-  on_error: "stop" | "continue";
-  capture: boolean;
-  condition?: "always" | "on_success" | "on_failure";
-}
-
-// Claude Agent SDK 経由のエージェントループ。ファイル編集 / Bash 等の副作用を伴う。
-export interface ClaudeAgentStep {
-  id: string;
-  claude_agent: {
-    prompt: string;
-    system?: string;
-    model: string;
-    // SDK の allowedTools にそのまま渡す（"Read", "Bash(git push:*)" など）。
-    allowed_tools: string[];
-    // SDK の maxTurns に対応（省略時は SDK 既定）。
-    max_turns?: number;
-    // "strict" は allowed_tools に無い tool 呼び出しを全て deny。
-    // "bypass" は全ツールを許可（allowDangerouslySkipPermissions = true）。
-    permission_mode: "strict" | "bypass";
-    // 絶対パス。省略時は process.cwd()。
-    cwd?: string;
-    // 既定の運用規約（PR 重複検知 / 決定的 branch 命名 / dirty tree チェック）を
-    // system prompt に自動 append するか。既定 false。
-    // true にすると preamble が git status:* / git ls-remote:* / gh pr list:* を agent に
-    // 要求するため、allowed_tools にこれらが含まれていない runbook では canUseTool に
-    // 弾かれる。opt-in を明示してもらう前提でデフォルトは off にしている。
-    conventions: boolean;
-  };
-  timeout_sec: number;
-  on_error: "stop" | "continue";
-  capture: boolean;
-  condition?: "always" | "on_success" | "on_failure";
-}
-
-// 識別共用体。トリガー種別ごとに利用可能なフィールドを型で表現する。
 export type TriggerEvent =
   | { type: "file"; path: string; content: string; timestamp: string }
   | { type: "cron"; timestamp: string }
@@ -135,11 +86,8 @@ export type TriggerEvent =
       timestamp: string;
     };
 
-// 全ステップ実行時に渡される共通コンテキスト。
-// bash / claude / claude_agent いずれの runner も同じ型を受け取る。
-export interface StepContext {
+export interface AgentContext {
   event: TriggerEvent;
-  capturedSteps: Record<string, string>;
   idempotencyKey: string;
 }
 
@@ -161,9 +109,6 @@ export interface TriggerState {
   last_fired_at: string;
 }
 
-// CloudWatch Logs poller の cursor。
-// `last_event_timestamp_ms` は次回 FilterLogEvents 呼び出しの startTime（inclusive）。
-// `last_event_ids` は同 ms に複数 event があり得るため boundary 重複除去用。
 export interface AwsCloudWatchLogsPollerState {
   region: string;
   log_group: string;
@@ -172,11 +117,6 @@ export interface AwsCloudWatchLogsPollerState {
   last_polled_at: string;
 }
 
-// Datadog Monitor poller の cursor。
-// 観測した monitor id ごとの最終状態を保持し、次回 tick で差分を取って遷移を検出する。
-// `monitor_tags` を含むのは集約キーと state ファイル名の整合のため（監査用に冗長保存）。
-// `monitor_states` は「前回 state ∪ 今回観測分」の merge で書き戻す（削除検知は諦め、
-// fail-open 寄りで欠落より残す側に倒す）。
 export interface DatadogMonitorsPollerState {
   site: string;
   monitor_tags: string[];
@@ -184,20 +124,13 @@ export interface DatadogMonitorsPollerState {
   last_polled_at: string;
 }
 
-export interface StepResult {
-  stepId: string;
+export interface AgentResult {
   ok: boolean;
-  exit_code: number | null;
-  signal: string | null;
+  exit_code: 0 | 1;
   stdout: string;
-  stderr: string;
   duration_ms: number;
   timed_out: boolean;
   error: string | null;
-  // capture: true のステップで、テンプレ展開で使われる正規化済み stdout（trailing newline 除去）。
-  // それ以外のステップでは null。
-  captured: string | null;
-  skipped: boolean;
 }
 
 export interface RunResult {
@@ -206,6 +139,6 @@ export interface RunResult {
   started_at: string;
   finished_at: string;
   ok: boolean;
-  steps: StepResult[];
+  agent: AgentResult;
   trigger_event: TriggerEvent;
 }

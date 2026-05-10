@@ -2,17 +2,17 @@
 
 > **日本語** | [English](./README.md)
 
-ローカルのログファイル、cron スケジュール、CloudWatch Logs、または Datadog Monitor に反応して bash ランブックを実行する CLI。
+ローカルのログファイル、cron スケジュール、CloudWatch Logs、Datadog Monitor に反応して **Claude agent** を実行する CLI。
 
-> mihari (見張り) — ログを見張って、決まった対応を自動で走らせる軽量エンジン。
+> mihari (見張り) — シグナルを見張って、Claude agent に対応を任せる軽量エンジン。
 
 ## できること
 
 - ログファイルを定期ポーリング（tail 相当）。新規行が正規表現にマッチでランブック起動
-- cron 式で時刻ベースの定期実行（HTTP 監視は `bash` + `curl` で書く）
+- cron 式で時刻ベースの定期実行（HTTP 監視は agent に `Bash(curl:*)` を許可して書く）
 - CloudWatch Logs を `interval_sec` 間隔でポーリング（ローカル `file` トリガーと対称、AWS SDK は使うときだけ動的 import）
 - Datadog Monitor をポーリングし、`ok -> alert` などの状態遷移 1 件ごとに発火（Datadog SDK は使うときだけ動的 import）
-- ランブックは `bash` / `claude`（単発の Anthropic API 呼び出し）/ `claude_agent`（Agent SDK ループ、ファイル編集・Bash ツール経由で副作用あり）ステップで構成
+- ランブックは **agent 1 本** で実行（Agent SDK ループ、ファイル編集 / Bash ツール経由）。Datadog / Jira / Slack のような外部 SaaS は `providers:` を opt-in で宣言すると、各サービスの作法 preamble が system prompt に挿入される。認証は env、YAML には書かない
 - ファイル位置 / 発火時刻を `~/.mihari/state/` に保存
 
 ## クイックスタート
@@ -22,15 +22,23 @@ npm install
 npm run build
 
 # ランブックを書く
-cat > runbooks/disk-full.yaml <<'YAML'
-id: disk-full-cleanup
+cat > runbooks/dd-monitor-jira.yaml <<'YAML'
+id: dd-monitor-jira
 trigger:
-  source: file
-  path: /var/log/myapp.log
-  pattern: "ERROR.*disk full"
-steps:
-  - id: cleanup
-    bash: /usr/local/bin/cleanup-tmp.sh
+  source: datadog_monitors
+  site: datadoghq.com
+  monitor_tags: [env:prod]
+  transitions: [alert, ok]
+  interval_sec: 60
+agent:
+  prompt: |
+    Datadog monitor "{{ event.monitor_name }}" が
+    {{ event.from_state }} -> {{ event.to_state }} に遷移した。
+    調査して Jira を起票またはクローズせよ。
+  providers: [datadog, jira]
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
 YAML
 
 # 常駐モード

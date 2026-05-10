@@ -13,6 +13,7 @@ import type {
   Runbook,
 } from "../src/types/index.js";
 import type { StateStore } from "../src/state/store.js";
+import { fakeAgent } from "./_fixtures.js";
 
 function fakeApi(
   responses: FilterLogEventsOutput[],
@@ -300,9 +301,7 @@ describe("uniqueAwsCloudWatchLogsTriggers", () => {
         log_group: group,
         interval_sec: intervalSec,
       },
-      steps: [
-        { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
-      ],
+      agent: fakeAgent(),
       sourcePath: `/tmp/${id}.yaml`,
     };
   }
@@ -331,9 +330,7 @@ describe("uniqueAwsCloudWatchLogsTriggers", () => {
     const fileRb: Runbook = {
       id: "x",
       trigger: { source: "file", path: "/var/log/x", pattern: /./ },
-      steps: [
-        { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
-      ],
+      agent: fakeAgent(),
       sourcePath: "/tmp/x.yaml",
     };
     const out = uniqueAwsCloudWatchLogsTriggers([fileRb]);

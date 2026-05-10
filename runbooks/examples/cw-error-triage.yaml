@@ -1,0 +1,28 @@
+id: cw-error-triage
+description: CloudWatch Logs の ERROR を agent が一次切り分けして Slack に通知
+
+trigger:
+  source: aws_cloudwatch_logs
+  region: us-east-1
+  log_group: /aws/lambda/myfunc
+  pattern: "ERROR"
+  interval_sec: 60
+
+cooldown_sec: 300
+
+agent:
+  prompt: |
+    {{ event.path }} ({{ event.log_stream }}) に ERROR を観測した:
+
+      {{ event.line }}
+
+    関連しそうなコンテキストが必要なら CloudWatch / 他 API は使わず、event
+    の情報のみで一次要約を作って Slack に通知せよ。深追いは不要。
+  providers:
+    - slack
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 3
+  timeout_sec: 60

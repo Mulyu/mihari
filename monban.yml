@@ -12,7 +12,7 @@ doc:
     - path: "CLAUDE.md"
 
 # src/ レイアウトを構造リンタで固定する。
-# 8 つのトップレベルディレクトリ（cli/ engine/ lib/ loader/ state/ steps/ triggers/ types/）
+# 8 つのトップレベルディレクトリ（agent/ cli/ engine/ lib/ loader/ state/ triggers/ types/）
 # のみを src/ 直下に置く。直下に .ts ファイルは置かない（必ずディレクトリ配下）。
 # 新規ディレクトリの追加が必要なら direction を更新してから入れる。
 path:
@@ -30,12 +30,12 @@ path:
     # src/ 直下は 8 ディレクトリのみ。直下ファイルは置かない。
     - path: "src"
       files:
+        - "agent/"
         - "cli/"
         - "engine/"
         - "lib/"
         - "loader/"
         - "state/"
-        - "steps/"
         - "triggers/"
         - "types/"
     # ユーザー向けドキュメントの日英ペア。
@@ -62,9 +62,9 @@ path:
       message: "decisions ログはリポジトリに置かない。判断は PR 説明と git log に残す"
 
     # src/ 直下のディレクトリは許可リスト方式で固定。
-    - path: "src/!(cli|engine|lib|loader|state|steps|triggers|types)/"
+    - path: "src/!(agent|cli|engine|lib|loader|state|triggers|types)/"
       type: directory
-      message: "src/ 直下のディレクトリは cli/ engine/ lib/ loader/ state/ steps/ triggers/ types/ のみ。新設は CLAUDE.md とこの allowlist の更新が前提"
+      message: "src/ 直下のディレクトリは agent/ cli/ engine/ lib/ loader/ state/ triggers/ types/ のみ。新設は CLAUDE.md とこの allowlist の更新が前提"
     # src/ 直下に .ts ファイルを置かない。すべてサブディレクトリ配下に置く。
     - path: "src/*.ts"
       type: file

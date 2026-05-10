@@ -1,0 +1,34 @@
+id: dd-monitor-jira
+description: Datadog monitor の遷移を agent が調査し、Jira を起票またはクローズする
+
+trigger:
+  source: datadog_monitors
+  site: datadoghq.com
+  monitor_tags:
+    - "env:prod"
+  transitions:
+    - alert
+    - ok
+  interval_sec: 60
+
+cooldown_sec: 600
+
+agent:
+  prompt: |
+    Datadog monitor "{{ event.monitor_name }}" (id={{ event.monitor_id }}) が
+    {{ event.from_state }} -> {{ event.to_state }} に遷移した。
+
+    - to_state が alert/warn/no_data の場合: 必要に応じて Datadog API で
+      monitor 詳細・関連 events を取得して状況を要約し、Jira に起票する。
+      重複起票を避けるため、起票前に MIHARI_IDEMPOTENCY_KEY で既存検索すること。
+    - to_state が ok の場合: 当該 monitor に紐づく未クローズの Jira を検索して
+      クローズする。
+  providers:
+    - datadog
+    - jira
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 30
+  timeout_sec: 600

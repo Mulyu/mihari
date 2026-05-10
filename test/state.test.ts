@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { StateStore } from "../src/state/store.js";
@@ -48,7 +48,14 @@ function makeRun(id: string, runbookId: string, startedAt: string, ok = true): R
     started_at: startedAt,
     finished_at: startedAt,
     ok,
-    steps: [],
+    agent: {
+      ok,
+      exit_code: ok ? 0 : 1,
+      stdout: "",
+      duration_ms: 1,
+      timed_out: false,
+      error: null,
+    },
     trigger_event: { type: "manual", timestamp: startedAt },
   };
 }
@@ -102,6 +109,28 @@ describe("StateStore run results", () => {
     await s.appendRunResult(makeRun("run_other", "rb", "2026-04-26T10:00:00Z"));
     const got = s.getRun("run_target");
     expect(got?.run_id).toBe("run_target");
+  });
+
+  it("skips pre-1.0 run records (steps[] without agent) instead of crashing", async () => {
+    const s = new StateStore({ baseDir: dir });
+    const date = "2026-04-26";
+    const dayDir = join(dir, "runs", date);
+    mkdirSync(dayDir, { recursive: true });
+    writeFileSync(
+      join(dayDir, "run_legacy.jsonl"),
+      JSON.stringify({
+        run_id: "run_legacy",
+        runbook_id: "rb",
+        started_at: `${date}T00:00:00Z`,
+        finished_at: `${date}T00:00:01Z`,
+        ok: true,
+        steps: [{ stepId: "x", ok: true }],
+        trigger_event: { type: "manual", timestamp: `${date}T00:00:00Z` },
+      }) + "\n",
+    );
+    await s.appendRunResult(makeRun("run_new", "rb", `${date}T01:00:00Z`));
+    expect(s.listRuns().map((r) => r.run_id)).toEqual(["run_new"]);
+    expect(s.getRun("run_legacy")).toBeNull();
   });
 
   it("getRun returns null for unknown ids", () => {

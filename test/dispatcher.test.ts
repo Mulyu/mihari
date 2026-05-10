@@ -12,6 +12,7 @@ import type {
   RunResult,
   TriggerEvent,
 } from "../src/types/index.js";
+import { fakeAgent } from "./_fixtures.js";
 
 function fakeState(runs: RunResult[] = []): StateStore {
   return {
@@ -23,7 +24,7 @@ function fileRb(id: string, path: string, pattern: RegExp, extra: Partial<Runboo
   return {
     id,
     trigger: { source: "file", path, pattern },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
     ...extra,
   };
@@ -33,7 +34,7 @@ function cronRb(id: string, schedule: string, extra: Partial<Runbook> = {}): Run
   return {
     id,
     trigger: { source: "cron", schedule },
-    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
     ...extra,
   };
@@ -53,7 +54,14 @@ function fakeExecutor(ok = true): Executor & {
         started_at: new Date().toISOString(),
         finished_at: new Date().toISOString(),
         ok,
-        steps: [],
+        agent: {
+        ok: true,
+        exit_code: 0,
+        stdout: "",
+        duration_ms: 1,
+        timed_out: false,
+        error: null,
+      },
         trigger_event: event,
       };
       return r;
@@ -82,9 +90,7 @@ function cwRb(id: string, region: string, group: string, pattern?: RegExp): Runb
     trigger: pattern
       ? { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60, pattern }
       : { source: "aws_cloudwatch_logs", region, log_group: group, interval_sec: 60 },
-    steps: [
-      { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
-    ],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
   };
 }
@@ -114,9 +120,7 @@ function ddRb(
   return {
     id,
     trigger,
-    steps: [
-      { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
-    ],
+    agent: fakeAgent(),
     sourcePath: `/tmp/${id}.yaml`,
     ...extra,
   };
@@ -520,7 +524,14 @@ describe("dispatcher: cooldown_sec", () => {
       started_at: new Date(Date.now() - 10_000).toISOString(),
       finished_at: new Date(Date.now() - 9_000).toISOString(),
       ok: true,
-      steps: [],
+      agent: {
+        ok: true,
+        exit_code: 0,
+        stdout: "",
+        duration_ms: 1,
+        timed_out: false,
+        error: null,
+      },
       trigger_event: event,
     };
     const r = await tick({
@@ -545,7 +556,14 @@ describe("dispatcher: cooldown_sec", () => {
       started_at: new Date(Date.now() - 400_000).toISOString(),
       finished_at: new Date(Date.now() - 399_000).toISOString(),
       ok: true,
-      steps: [],
+      agent: {
+        ok: true,
+        exit_code: 0,
+        stdout: "",
+        duration_ms: 1,
+        timed_out: false,
+        error: null,
+      },
       trigger_event: event,
     };
     const r = await tick({
@@ -588,7 +606,14 @@ describe("dispatcher: cooldown_sec", () => {
       started_at: new Date(Date.now() - 10_000).toISOString(),
       finished_at: new Date(Date.now() - 9_000).toISOString(),
       ok: true,
-      steps: [],
+      agent: {
+        ok: true,
+        exit_code: 0,
+        stdout: "",
+        duration_ms: 1,
+        timed_out: false,
+        error: null,
+      },
       trigger_event: event,
     };
     const r = await tick({
@@ -621,7 +646,14 @@ describe("dispatcher: cooldown_sec", () => {
       started_at: new Date(Date.now() - 10_000).toISOString(),
       finished_at: new Date(Date.now() - 9_000).toISOString(),
       ok: true,
-      steps: [],
+      agent: {
+        ok: true,
+        exit_code: 0,
+        stdout: "",
+        duration_ms: 1,
+        timed_out: false,
+        error: null,
+      },
       trigger_event: event,
     };
     const r = await tick({
@@ -646,7 +678,14 @@ describe("dispatcher: cooldown_sec", () => {
       started_at: new Date(Date.now() - 10_000).toISOString(),
       finished_at: new Date(Date.now() - 9_000).toISOString(),
       ok: true,
-      steps: [],
+      agent: {
+        ok: true,
+        exit_code: 0,
+        stdout: "",
+        duration_ms: 1,
+        timed_out: false,
+        error: null,
+      },
       trigger_event: event,
     };
     const r = await tick({

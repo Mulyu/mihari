@@ -53,7 +53,7 @@ mihari poll --dry-run
 ランブックをトリガー無しで実行する。`event` は `{type: "manual", timestamp: now}`。
 
 ```bash
-mihari run disk-full-cleanup
+mihari run dd-monitor-jira
 ```
 
 ## `mihari list`
@@ -77,11 +77,10 @@ mihari status
 出力例（タブ区切り）：
 
 ```
-disk-full-cleanup   file:/var/log/myapp.log                        2026-04-29T02:11Z   ok    -
-api-health          cron:*/5 * * * *                               2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
-backup-freshness    cron:0 9 * * *                                 2026-04-28T09:00Z   ok    2026-04-29T09:00Z
-lambda-error-alert  aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03:00Z   ok    -
-dd-monitor-alert    datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
+file-slack-alert    file:/var/log/myapp.log                        2026-04-29T02:11Z   ok    -
+cron-health-agent   cron:*/5 * * * *                               2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
+cw-error-triage     aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03:00Z   ok    -
+dd-monitor-jira     datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
 ```
 
 `enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` / `aws_cloudwatch_logs` / `datadog_monitors` トリガーでは常に `-`。

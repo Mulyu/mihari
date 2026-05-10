@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { match, matchAwsCloudWatchLogs, uniqueTriggerPaths } from "../src/engine/matcher.js";
-import type { Runbook, TriggerEvent } from "../src/types/index.js";
+import {
+  match,
+  matchAwsCloudWatchLogs,
+  matchDatadogMonitor,
+  uniqueTriggerPaths,
+} from "../src/engine/matcher.js";
+import type { DatadogMonitorState, Runbook, TriggerEvent } from "../src/types/index.js";
 
 function fileRb(id: string, path: string, pattern: RegExp): Runbook {
   return {
@@ -116,6 +121,116 @@ describe("matchAwsCloudWatchLogs", () => {
     ];
     const m = matchAwsCloudWatchLogs(cwEvent("us-east-1", "/g", "x"), rbs);
     expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+});
+
+function ddRb(
+  id: string,
+  site: string,
+  monitorTags: string[] | undefined,
+  transitions: DatadogMonitorState[],
+): Runbook {
+  const trigger: Runbook["trigger"] = {
+    source: "datadog_monitors",
+    site,
+    transitions,
+    interval_sec: 60,
+  };
+  if (monitorTags !== undefined) trigger.monitor_tags = monitorTags;
+  return {
+    id,
+    trigger,
+    steps: [{ id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false }],
+    sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function ddEvent(
+  site: string,
+  monitorTags: string[],
+  fromState: DatadogMonitorState,
+  toState: DatadogMonitorState,
+): Extract<TriggerEvent, { type: "datadog_monitor" }> {
+  return {
+    type: "datadog_monitor",
+    site,
+    monitor_tags: monitorTags,
+    monitor_id: "1",
+    monitor_name: "m1",
+    from_state: fromState,
+    to_state: toState,
+    timestamp: "2026-05-09T12:00:00Z",
+  };
+}
+
+describe("matchDatadogMonitor", () => {
+  it("matches when site, sorted monitor_tags, and to_state ∈ transitions all align", () => {
+    const rbs = [ddRb("a", "datadoghq.com", ["env:prod"], ["alert"])];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose site differs", () => {
+    const rbs = [
+      ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]),
+      ddRb("b", "datadoghq.eu", ["env:prod"], ["alert"]),
+    ];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose monitor_tags differ", () => {
+    const rbs = [
+      ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]),
+      ddRb("b", "datadoghq.com", ["env:staging"], ["alert"]),
+      ddRb("c", "datadoghq.com", undefined, ["alert"]),
+    ];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("treats monitor_tags ordering as irrelevant", () => {
+    const rbs = [ddRb("a", "datadoghq.com", ["service:web", "env:prod"], ["alert"])];
+    const m = matchDatadogMonitor(
+      ddEvent("datadoghq.com", ["env:prod", "service:web"], "ok", "alert"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("treats undefined and [] monitor_tags as the same key", () => {
+    const rbs = [ddRb("a", "datadoghq.com", undefined, ["alert"])];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", [], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose transitions list does not include to_state", () => {
+    const rbs = [
+      ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]),
+      ddRb("b", "datadoghq.com", ["env:prod"], ["warn"]),
+    ];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("returns multiple matches when several runbooks subscribe to the same key with overlapping transitions", () => {
+    const rbs = [
+      ddRb("a", "datadoghq.com", ["env:prod"], ["alert", "warn"]),
+      ddRb("b", "datadoghq.com", ["env:prod"], ["alert"]),
+    ];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("ignores file / cron / aws_cloudwatch_logs runbooks", () => {
+    const rbs: Runbook[] = [
+      fileRb("f", "/var/log/x", /./),
+      cronRb("c", "* * * * *"),
+      cwRb("w", "us-east-1", "/g"),
+      ddRb("d", "datadoghq.com", ["env:prod"], ["alert"]),
+    ];
+    const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["d"]);
   });
 });
 

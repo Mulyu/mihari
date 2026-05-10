@@ -5,10 +5,6 @@ import { captureStdout, substituteClaudeTemplate } from "./template.js";
 
 const log = logger("step.claude");
 
-// 後方互換用 re-export（claude-agent-step が捨てる経路）。
-export { substituteClaudeTemplate, captureStdout as captureClaudeOutput };
-export type { StepContext };
-
 export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise<StepResult> {
   const start = Date.now();
   const prompt = substituteClaudeTemplate(step.claude.prompt, ctx);
@@ -32,7 +28,8 @@ export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise
     clearTimeout(timer);
     const textBlock = response.content.find((b) => b.type === "text");
     const stdout = textBlock?.type === "text" ? textBlock.text : "";
-    const ok = response.stop_reason !== "max_tokens";
+    const ok =
+      response.stop_reason === "end_turn" || response.stop_reason === "stop_sequence";
 
     log.debug(
       {

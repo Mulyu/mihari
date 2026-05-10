@@ -9,9 +9,6 @@ import {
 
 const log = logger("step.bash");
 
-// 後方互換用 re-export（旧 import パスを使うコード向け）。
-export { captureStdout, normalizeStepEnvName, substituteBashTemplate as substituteTemplate };
-
 export function buildEnv(
   base: NodeJS.ProcessEnv,
   step: BashStep,
@@ -67,15 +64,25 @@ export async function runBashStep(step: BashStep, ctx: StepContext): Promise<Ste
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let killTimer: NodeJS.Timeout | null = null;
 
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
       // SIGTERM が無視されたら強制終了
-      setTimeout(() => {
+      killTimer = setTimeout(() => {
+        killTimer = null;
         if (!child.killed) child.kill("SIGKILL");
       }, 1000);
     }, step.timeout_sec * 1000);
+
+    const clearTimers = () => {
+      clearTimeout(timer);
+      if (killTimer !== null) {
+        clearTimeout(killTimer);
+        killTimer = null;
+      }
+    };
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
@@ -85,7 +92,7 @@ export async function runBashStep(step: BashStep, ctx: StepContext): Promise<Ste
     });
 
     child.on("error", (err) => {
-      clearTimeout(timer);
+      clearTimers();
       log.warn({ stepId: step.id, err: err.message }, "spawn error");
       resolveResult({
         stepId: step.id,
@@ -103,7 +110,7 @@ export async function runBashStep(step: BashStep, ctx: StepContext): Promise<Ste
     });
 
     child.on("close", (code, signal) => {
-      clearTimeout(timer);
+      clearTimers();
       const ok = !timedOut && code === 0;
       resolveResult({
         stepId: step.id,

@@ -1,0 +1,26 @@
+id: file-slack-alert
+description: アプリケーションログの ERROR 行を agent が一次切り分けし Slack に通知
+
+trigger:
+  source: file
+  path: /var/log/myapp.log
+  pattern: "ERROR"
+
+cooldown_sec: 300
+
+agent:
+  prompt: |
+    {{ event.path }} に ERROR 行を観測した:
+
+      {{ event.line }}
+
+    一次切り分けの要約（誰に何を伝えたいか）を 1 〜 2 行に圧縮し、Slack の
+    incoming webhook に投稿せよ。原因究明はしない。
+  providers:
+    - slack
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 3
+  timeout_sec: 60

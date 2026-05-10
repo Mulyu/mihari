@@ -1,0 +1,24 @@
+id: cron-health-agent
+description: 5 分ごとに /health を叩いて結果を agent が確認、問題があれば Slack 通知
+
+trigger:
+  source: cron
+  schedule: "*/5 * * * *"
+
+agent:
+  prompt: |
+    以下の手順で health check を行い、結果に応じて行動せよ:
+
+      1. curl -fsS --max-time 5 https://example.com/health を実行
+      2. レスポンスに "status":"ok" が含まれていれば「ok」と報告して終了
+      3. 含まれていなければ Slack webhook に異常を通知（短文で十分）
+
+    余計な調査はしない。1 ターンで完結すること。
+  providers:
+    - slack
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 3
+  timeout_sec: 30

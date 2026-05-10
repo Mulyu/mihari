@@ -48,7 +48,14 @@ function makeRun(id: string, runbookId: string, startedAt: string, ok = true): R
     started_at: startedAt,
     finished_at: startedAt,
     ok,
-    steps: [],
+    agent: {
+      ok,
+      exit_code: ok ? 0 : 1,
+      stdout: "",
+      duration_ms: 1,
+      timed_out: false,
+      error: null,
+    },
     trigger_event: { type: "manual", timestamp: startedAt },
   };
 }

@@ -22,9 +22,9 @@ trigger:
   log_group: /aws/lambda/myfunc
   pattern: "ERROR"
   interval_sec: 60
-steps:
-  - id: do-it
-    bash: echo hi
+agent:
+  prompt: "noop"
+  allowed_tools: [Read]
 `.trim();
 
 describe("aws_cloudwatch_logs trigger loader", () => {

@@ -26,9 +26,9 @@ trigger:
     - alert
     - warn
   interval_sec: 60
-steps:
-  - id: do-it
-    bash: echo hi
+agent:
+  prompt: "noop"
+  allowed_tools: [Read]
 `.trim();
 
 describe("datadog_monitors trigger loader", () => {

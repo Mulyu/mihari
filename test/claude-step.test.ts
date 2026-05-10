@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClaudeStep, StepContext, TriggerEvent } from "../src/types/index.js";
 
-// Anthropic SDK をモジュールごとモックして runClaudeStep の挙動を直接検証する。
-// 各テストで mockCreate.mockResolvedValueOnce / mockRejectedValueOnce を切り替える。
 const mockCreate = vi.fn();
 vi.mock("@anthropic-ai/sdk", () => {
   return {

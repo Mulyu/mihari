@@ -28,10 +28,6 @@ export async function runClaudeStep(step: ClaudeStep, ctx: StepContext): Promise
     clearTimeout(timer);
     const textBlock = response.content.find((b) => b.type === "text");
     const stdout = textBlock?.type === "text" ? textBlock.text : "";
-    // 単発 messages.create で「正常終了」と見なすのは end_turn と stop_sequence のみ。
-    // max_tokens / refusal / tool_use / pause_turn / null は明示 fail。
-    // とくに refusal をサイレント成功として通すと、ランブックの後続ステップが
-    // 偽の出力で動いてしまう。
     const ok =
       response.stop_reason === "end_turn" || response.stop_reason === "stop_sequence";
 

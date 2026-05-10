@@ -64,8 +64,6 @@ export async function runBashStep(step: BashStep, ctx: StepContext): Promise<Ste
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    // SIGKILL エスカレーション timer を外で持っておき、子が素直に死んだら clearTimeout して
-    // event loop に空打ちを残さない（daemon で多数 timeout が起きると bounded だが地味に効く）。
     let killTimer: NodeJS.Timeout | null = null;
 
     const timer = setTimeout(() => {

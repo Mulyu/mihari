@@ -2,17 +2,17 @@
 
 > [日本語](./README.ja.md) | **English**
 
-A CLI that runs bash runbooks in response to local log files, cron schedules, CloudWatch Logs, or Datadog Monitors.
+A CLI that runs a Claude agent in response to local log files, cron schedules, CloudWatch Logs, or Datadog Monitors.
 
-> mihari (見張り, "watcher") — a lightweight engine that watches your logs and runs predetermined responses automatically.
+> mihari (見張り, "watcher") — a lightweight engine that watches your signals and lets a Claude agent decide what to do.
 
 ## What it does
 
 - Polls log files periodically (tail-equivalent). When a new line matches a regular expression, the runbook fires.
-- Time-based scheduling via cron expressions (write HTTP checks as `bash` + `curl`).
+- Time-based scheduling via cron expressions (write HTTP checks as `Bash(curl:*)` allowed for the agent).
 - Polls CloudWatch Logs streams (parallel to local file tail; AWS SDK loaded only when used).
 - Polls Datadog Monitors and fires on state transitions (e.g. `ok -> alert`); Datadog SDK loaded only when used.
-- Runbooks are made of `bash`, `claude` (single-shot Anthropic API call), and `claude_agent` (Agent SDK loop with file-edit / Bash tools) steps.
+- Each runbook runs a **single Claude agent** (Agent SDK loop with file-edit / Bash tools). External SaaS (Datadog / Jira / Slack) are wired in via opt-in `providers:` preambles — auth stays in env vars, never YAML.
 - File offsets / firing timestamps are persisted under `~/.mihari/state/`.
 
 ## Quick start
@@ -22,15 +22,23 @@ npm install
 npm run build
 
 # Author a runbook
-cat > runbooks/disk-full.yaml <<'YAML'
-id: disk-full-cleanup
+cat > runbooks/dd-monitor-jira.yaml <<'YAML'
+id: dd-monitor-jira
 trigger:
-  source: file
-  path: /var/log/myapp.log
-  pattern: "ERROR.*disk full"
-steps:
-  - id: cleanup
-    bash: /usr/local/bin/cleanup-tmp.sh
+  source: datadog_monitors
+  site: datadoghq.com
+  monitor_tags: [env:prod]
+  transitions: [alert, ok]
+  interval_sec: 60
+agent:
+  prompt: |
+    Datadog monitor "{{ event.monitor_name }}" went
+    {{ event.from_state }} -> {{ event.to_state }}.
+    Investigate and create or close a Jira ticket.
+  providers: [datadog, jira]
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
 YAML
 
 # Resident mode

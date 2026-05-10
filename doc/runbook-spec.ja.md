@@ -2,18 +2,20 @@
 
 > **日本語** | [English](./runbook-spec.md)
 
-ランブックは `runbooks/*.yaml`。起動時にディレクトリを再帰せずに（直下のみ）読む。
+ランブックは `runbooks/*.yaml` に置く。起動時、トップレベルのみ非再帰でディレクトリを読む。
 
 ## スキーマ
 
 ```yaml
-id: kebab-case-id          # 必須。`[a-z0-9][a-z0-9-]*`
+id: kebab-case-id          # 必須。`[a-z0-9][a-z0-9-]*` に一致
 description: ...           # 任意
-enabled: true              # 任意。false にすると daemon/poll で発火しない（デフォルト true）
-cooldown_sec: 300          # 任意。前回発火から指定秒以内は再発火しない
+enabled: true              # 任意。false にすると daemon/poll はスキップ（既定 true）
+cooldown_sec: 300          # 任意。直近の発火から N 秒以内は再発火しない
 trigger: ...               # 必須。file / cron / aws_cloudwatch_logs / datadog_monitors のいずれか
-steps: [ ... ]             # 必須。1件以上
+agent: ...                 # 必須。Claude agent ブロックを 1 つ
 ```
+
+1.0 ランブックは `agent:` を **必ず 1 つ** 持つ。0.x の `steps:` は廃止。`steps:` キーが残っているランブックは loader が拒否する。
 
 ## トリガー
 
@@ -26,12 +28,12 @@ trigger:
   pattern: "ERROR.*disk full"
 ```
 
-| フィールド | 内容 |
+| フィールド | 役割 |
 |----------|------|
-| `path` | 監視するログファイルの絶対パス |
+| `path` | tail する絶対パス |
 | `pattern` | 行に対する正規表現 |
 
-複数ランブックが同一行にマッチしたら全て順次実行。初回起動時は state がないため、ファイル末尾から読み始める（過去ログは巻き戻さない）。
+複数のランブックが同じ行にマッチした場合は順次実行される。初回起動時は state がないのでファイル末尾から読み始める（過去ログを巻き戻さない）。
 
 ### `cron`
 
@@ -41,11 +43,11 @@ trigger:
   schedule: "*/5 * * * *"
 ```
 
-| フィールド | 内容 |
+| フィールド | 役割 |
 |----------|------|
-| `schedule` | 5フィールドの cron 式 |
+| `schedule` | 5 フィールド cron 式 |
 
-初回観測では発火せず、次のスロットを待つ。手動テストは `mihari run <id>`。1ティックで複数スロットが過ぎていても発火は1回（catch-up しない）。
+初回観測では発火せず次のスロットを待つ。手動テストは `mihari run <id>`。1 ティック中に複数スロットが過ぎていても発火は 1 回（catch-up しない）。
 
 ### `aws_cloudwatch_logs`
 
@@ -54,24 +56,11 @@ trigger:
   source: aws_cloudwatch_logs
   region: us-east-1
   log_group: /aws/lambda/myfunc
-  pattern: "ERROR"             # 任意。message に対する正規表現
+  pattern: "ERROR"             # メッセージ本文への任意の正規表現
   interval_sec: 60
 ```
 
-| フィールド | 内容 |
-|----------|------|
-| `region` | AWS リージョン。SDK の region 解決には頼らず明示必須（state key の同一性も担保） |
-| `log_group` | CloudWatch Logs の log group 名 |
-| `pattern` | 任意。各 event の message に対するクライアント側正規表現。省略時は全 event がマッチ |
-| `interval_sec` | ポーリング間隔（秒）。AWS API 課金を意識して必須化 |
-
-セマンティクスは `file` トリガーと対称。マッチした event 1 件ごとに 1 回発火し、初回観測では履歴を遡らない（cursor は「今」からシード）。
-
-cursor は `~/.mihari/state/aws-cloudwatch-logs/<sha1(region|log_group)>.json` に保存。書き込み失敗は fail-open（warn ログのみで処理続行）。
-
-認証は AWS SDK 標準チェーン（環境変数 / `~/.aws/credentials` / IAM ロール）に完全委譲。mihari は認証フィールドを一切公開しない。SDK は `aws_cloudwatch_logs` トリガーが 1 つでも存在するときだけ動的 import される。
-
-同じ `(region, log_group)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され、`interval_sec` は購読側の最小値が採用される。
+認証は AWS SDK の標準チェーン（環境変数 / `~/.aws/credentials` / IAM ロール）に完全委譲。mihari は YAML に認証フィールドを置かない。SDK は当該トリガーが存在する時のみ動的 import。同じ `(region, log_group)` を購読する複数ランブックは 1 つのポーラーを共有し、`interval_sec` は最小値が採用される。
 
 ### `datadog_monitors`
 
@@ -79,213 +68,104 @@ cursor は `~/.mihari/state/aws-cloudwatch-logs/<sha1(region|log_group)>.json` �
 trigger:
   source: datadog_monitors
   site: datadoghq.com
-  monitor_tags:                # 任意。AND フィルタ。Datadog SDK の monitorTags にそのまま渡す
+  monitor_tags:                # 任意。Datadog SDK の monitorTags へ AND 連結で渡す
     - "env:prod"
-  transitions:                 # 任意。発火する到達状態のリスト。デフォ ["alert"]
+  transitions:                 # 任意。発火する遷移先 state。既定 ["alert"]
     - alert
     - warn
   interval_sec: 60
 ```
 
-| フィールド | 内容 |
+認証は環境変数 `DD_API_KEY` / `DD_APP_KEY` を mihari が読み、SDK にそのまま渡す。同じ `(site, monitor_tags)` を購読する複数ランブックは 1 つのポーラーを共有し、`transitions` フィルタは matcher 側で個別適用される。
+
+## Agent
+
+```yaml
+agent:
+  prompt: |
+    Investigate {{ event.line }} and decide what to do.
+  prompt_file: prompts/investigate.md     # prompt と排他
+  system: You are an on-call agent.       # 任意
+  system_file: prompts/system.md          # 任意。system と排他
+  model: claude-opus-4-7                  # 既定 claude-opus-4-7
+
+  providers:                              # 任意。SaaS 用 preamble の opt-in
+    - datadog
+    - jira
+    - slack
+
+  allowed_tools:                          # 必須・非空
+    - Read
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+    - "Bash(git status:*)"
+
+  permission_mode: strict                 # strict（既定）/ bypass
+  max_turns: 30                           # 既定 30
+  timeout_sec: 600                        # 既定 600
+  conventions: false                      # 既定。PR 冪等性 preamble の opt-in
+  cwd: /home/user/work                    # 絶対パス。既定 process.cwd()
+```
+
+| フィールド | 役割 |
 |----------|------|
-| `site` | Datadog のサイト（`datadoghq.com` / `datadoghq.eu` / `us3.datadoghq.com` 等）。SDK の region 解決には頼らず明示必須（state key の同一性も担保） |
-| `monitor_tags` | 任意。タグフィルタの配列（`["env:prod", "service:web"]`）。SDK へはカンマ区切り `monitorTags` として渡す。省略時はサイト上の全 monitor が対象 |
-| `transitions` | 任意。発火する到達状態の配列。許可値: `alert` / `warn` / `no_data` / `ok` / `skipped` / `ignored` / `unknown`。デフォ `["alert"]` |
-| `interval_sec` | ポーリング間隔（秒）。Datadog API のレート枠を意識して必須化 |
+| `prompt` / `prompt_file` | プロンプト本文かそのファイル（排他、どちらか必須） |
+| `system` / `system_file` | system プロンプト（任意、排他） |
+| `model` | モデル ID（既定 `claude-opus-4-7`） |
+| `providers` | preamble の opt-in 一覧。`datadog` / `jira` / `slack` を宣言した順に system prompt の頭に preamble が挿入される |
+| `allowed_tools` | ツール許可リスト。`Read` / `Edit` / `Write` のような名前と `Bash(<command>:*)` / `Bash(<exact>)` のパターンを混在できる。**非空必須**。リスト外のツール呼び出しはプロンプトを出さずに拒否される |
+| `permission_mode` | `strict`（既定）は `canUseTool` で全ツール呼び出しを判定。`bypass` は `allowDangerouslySkipPermissions` を立てる |
+| `max_turns` | 最大ターン数。mihari 既定 `30` |
+| `timeout_sec` | エージェント実行全体のタイムアウト秒。mihari 既定 `600` |
+| `cwd` | エージェントの作業ディレクトリ（絶対パス）。既定は mihari 起動時のディレクトリ |
+| `conventions` | `true` で、`claude/fix-$MIHARI_IDEMPOTENCY_KEY` を branch 名にする / 既存 branch / 既存 open PR / dirty tree を検出したらスキップする旨の preamble を冒頭に挿入する。preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を要求するので、有効化する場合は `allowed_tools` に追加すること。既定 `false` |
 
-状態遷移（`ok -> alert` など）1 件ごとに 1 回発火する。セマンティクスは `aws_cloudwatch_logs` と対称で、初回観測では履歴を遡らず、cursor（monitor ごとの現在 `overall_state`）をシードするだけ。
+合成された system prompt の順序は `[conventions preamble（true のとき）] → [providers の順に preamble] → [user system]`。
 
-state は `~/.mihari/state/datadog-monitors/<sha1(site|sorted-monitor_tags)>.json` に保存。書き込み失敗は fail-open（warn ログのみで処理続行）。
+## Provider
 
-認証は環境変数 `DD_API_KEY` / `DD_APP_KEY` から読み、SDK にそのまま渡す。mihari は YAML に認証フィールドを置かない。SDK は `datadog_monitors` トリガーが 1 つでも存在するときだけ動的 import される。
+`agent.providers: [...]` を宣言すると、サービスごとの preamble が system prompt に挿入される。認証は環境変数（mihari は YAML に secret を置かない）。
 
-同じ `(site, monitor_tags)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され、`interval_sec` は購読側の最小値が採用される。`transitions` の絞り込みは matcher 側で runbook ごとに独立に適用する。
+| Provider | 必須環境変数 | preamble の内容 |
+|---|---|---|
+| `datadog` | `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE` | API/APP キーヘッダ付きの curl テンプレ、主要エンドポイント（monitor / events / metric query） |
+| `jira` | `JIRA_BASE`, `JIRA_USER`, `JIRA_TOKEN` | basic 認証 curl テンプレ、search / create / transition、`MIHARI_IDEMPOTENCY_KEY` を使った冪等性パターン |
+| `slack` | `SLACK_WEBHOOK_URL` | incoming webhook curl テンプレ |
 
-## ステップ
-
-### `bash`
-
-```yaml
-- id: cleanup
-  bash: |
-    df -h /var
-    /usr/local/bin/cleanup-tmp.sh
-  timeout_sec: 60          # デフォ 60
-  on_error: stop           # stop | continue（デフォ stop）
-  env:
-    APP_ENV: prod
-  capture: false           # true なら stdout を後続ステップに渡す（デフォ false）
-  condition: on_success    # always | on_success | on_failure（デフォなし）
-```
-
-| フィールド | 内容 |
-|----------|------|
-| `bash` | シェルスクリプト本文（複数行可） |
-| `timeout_sec` | タイムアウト秒数（超過時 SIGTERM → 1秒後 SIGKILL） |
-| `on_error` | `stop`: 失敗で打ち切り / `continue`: 次ステップへ |
-| `env` | 追加環境変数 |
-| `capture` | `true` で stdout を保存し、後続ステップから `{{ steps.<id>.output }}` で参照可能。失敗ステップの stdout は保存しない |
-| `condition` | 実行条件。`on_failure`: 前ステップが1つでも失敗したら実行 / `always`: 常に実行 / `on_success`: 前ステップが全て成功時のみ実行。省略時は `on_error: stop` による打ち切りのみ従う（既存の挙動） |
-
-`condition: on_failure` は `on_error: stop` による打ち切り後でも実行される。失敗通知ステップに使う：
-
-```yaml
-steps:
-  - id: main
-    bash: /usr/local/bin/cleanup.sh
-    on_error: stop
-
-  - id: notify
-    condition: on_failure
-    bash: printf '%s\tfailed\n' "{{ event.timestamp }}" >> /var/log/mihari/alerts.log
-    on_error: continue
-```
-
-stdout / stderr はログと履歴 JSONL に記録される。
-
-### `claude`
-
-```yaml
-- id: analyze-error
-  claude:
-    prompt: |
-      Error: {{ event.line }}
-      Context: {{ steps.get-context.output }}
-    prompt_file: prompts/analyze.md    # prompt と排他（ランブック YAML からの相対パス）
-    system: You are a DevOps expert.   # optional
-    system_file: prompts/system.md     # system と排他（任意）
-    model: claude-opus-4-7             # デフォ claude-opus-4-7
-    max_tokens: 1024                   # デフォ 1024
-  timeout_sec: 60
-  on_error: stop
-  capture: true
-  condition: on_failure
-```
-
-| フィールド | 内容 |
-|----------|------|
-| `claude.prompt` / `prompt_file` | プロンプト本文 / ファイル（相対パス、起動時読み込み）。どちらか必須 |
-| `claude.system` / `system_file` | システムプロンプト本文 / ファイル（任意） |
-| `claude.model` | モデル名（デフォ `claude-opus-4-7`） |
-| `claude.max_tokens` | 出力トークン上限（単発モードのみ） |
-| `timeout_sec` | タイムアウト秒数（デフォ 60） |
-| `on_error` | `stop` / `continue`（デフォ `stop`） |
-| `capture` | `true` で API レスポンスを後続ステップから `{{ steps.<id>.output }}` で参照可能 |
-| `condition` | `always` / `on_success` / `on_failure`（bash ステップと同じ） |
-
-`ANTHROPIC_API_KEY` を環境変数で設定。`stop_reason: max_tokens` は失敗扱い。
-
-### `claude_agent`
-
-Claude Agent SDK でエージェントループを回す独立ステップ種別。`Read` / `Edit` / `Write` / `Bash` などが使え、コード変更・コミット・PR 作成のような副作用を伴う処理に使う。capture される値は最終アシスタントメッセージ。副作用なしの単発質問は `claude:` を使うこと。
-
-```yaml
-- id: fix-and-pr
-  claude_agent:
-    prompt: |
-      An error occurred: {{ event.line }}
-      Investigate, fix it on a new branch, push, and open a PR.
-    system: You are working on the repository at the given cwd.   # optional
-    model: claude-opus-4-7                                          # デフォ
-    allowed_tools:
-      - Read
-      - Edit
-      - Write
-      - "Bash(git status)"
-      - "Bash(git diff:*)"
-      - "Bash(git switch:*)"
-      - "Bash(git add:*)"
-      - "Bash(git commit:*)"
-      - "Bash(git push:*)"
-      - "Bash(gh pr create:*)"
-    permission_mode: strict       # strict（デフォ） | bypass
-    max_turns: 30
-    cwd: /home/user/myrepo
-  timeout_sec: 600
-  on_error: stop
-  capture: true
-```
-
-| フィールド | 内容 |
-|---|---|
-| `claude_agent.prompt` / `prompt_file` | プロンプト本文 / ファイル（相対パス、起動時読み込み）。どちらか必須 |
-| `claude_agent.system` / `system_file` | システムプロンプト本文 / ファイル（任意） |
-| `claude_agent.model` | モデル名（デフォ `claude-opus-4-7`） |
-| `claude_agent.allowed_tools` | **必須**。ツール許可リスト。素のツール名（`Read` 等）と `Bash(<command>:*)` / `Bash(<exact>)` パターン。リスト外は prompt なしで deny。空配列は不可 |
-| `claude_agent.permission_mode` | `strict`（デフォ。全 tool 呼び出しを `canUseTool` で判定し、`allowed_tools` に無いものは deny） / `bypass`（全ツール許可。`allowDangerouslySkipPermissions` を立てる） |
-| `claude_agent.max_turns` | エージェント最大ターン数（デフォなし＝SDK のデフォルト） |
-| `claude_agent.cwd` | エージェントの作業ディレクトリ（絶対パス）。省略時は mihari の起動ディレクトリ |
-| `claude_agent.conventions` | `true` のとき、`claude/fix-$MIHARI_IDEMPOTENCY_KEY` を branch 名に使い、既存 branch / open PR / dirty tree を検知した場合はスキップする運用規約を system prompt に自動 append する。**デフォルトは `false`** — PR を開くタスクで、かつ後述の必要ツールを `allowed_tools` で許可している runbook が明示的に opt-in する形 |
-
-#### 組み込み idempotency 規約
-
-`MIHARI_IDEMPOTENCY_KEY` は **常に** export される。runbook id とトリガーイベント（file の場合はパス + 行、cron の場合は発火スロット、manual の場合は timestamp）から決定的に sha1 で計算した 12 文字 hex。同じトリガーが再観測されたら同じ値になる。`bash` ステップの env としても、`claude_agent` の Bash ツールにも自動的に渡す。
-
-`conventions: true` のときは **運用規約の preamble** を利用者の `system` プロンプトの**前に**固定パラグラフとして挟む。「PR を開く類のタスクなら `git status` が dirty なら中止 / `claude/fix-$MIHARI_IDEMPOTENCY_KEY` の branch がリモートにあれば中止 / そのキーがタイトルに含まれる open PR があれば中止 / すべて通ったら同名 branch を作って PR タイトルにキーを含める」と指示する。PR を開かないタスク（ファイル出力やマイグレーション等）は preamble を無視するよう書いてある。
-
-preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を agent に要求する。`true` にする場合は `allowed_tools` でこれらを許可しないと `canUseTool` に弾かれる。デフォルトを `false` にしているのは、必要ツールを許可していない runbook で preamble が一律に要求を追加すると壊れるため。
-
-段階制御は `allowed_tools` の中身だけで決まる：
-
-| 範囲 | 追加するエントリ |
-|---|---|
-| 編集のみ | `Read` `Edit` `Write` |
-| + ローカルコミット | + `Bash(git status)` `Bash(git diff:*)` `Bash(git switch:*)` `Bash(git add:*)` `Bash(git commit:*)` |
-| + push | + `Bash(git push:*)` |
-| + PR | + `Bash(gh pr create:*)` |
+起動時に必須 env が不足していても **warn ログのみで処理は止めない**。実際に当該 API を叩いた段階で SDK が失敗を返し、ランブックが ok=false になる。
 
 ## 変数
 
-`{{ ... }}` でテンプレ展開。実体は環境変数経由で渡されるため、ログ行に注入文字列が混ざっても安全。
+`agent.prompt` / `agent.system` および対応する `_file` の中身は `{{ ... }}` で展開される。
 
 | 変数 | `file` | `cron` | `aws_cloudwatch_logs` | `datadog_monitors` |
 |------|--------|--------|---|---|
-| `{{ event.line }}` | マッチした行 | 空文字 | event の message | 空文字 |
-| `{{ event.path }}` | ログファイルパス | 空文字 | log group 名 | 空文字 |
-| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO8601) | 発火時刻 (ISO8601) | event の timestamp (ISO8601) | 遷移を観測した時刻 (ISO8601) |
-| `{{ event.log_stream }}` | 空文字 | 空文字 | log stream 名 | 空文字 |
+| `{{ event.line }}` | マッチ行 | 空文字 | event の message | 空文字 |
+| `{{ event.path }}` | ログファイルパス | 空文字 | log_group 名 | 空文字 |
+| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO 8601) | 発火時刻 | event の timestamp | 遷移観測時刻 |
+| `{{ event.log_stream }}` | 空文字 | 空文字 | log_stream 名 | 空文字 |
 | `{{ event.monitor_id }}` | 空文字 | 空文字 | 空文字 | Datadog monitor id |
 | `{{ event.monitor_name }}` | 空文字 | 空文字 | 空文字 | Datadog monitor 名 |
-| `{{ event.from_state }}` | 空文字 | 空文字 | 空文字 | 遷移前の状態 |
-| `{{ event.to_state }}` | 空文字 | 空文字 | 空文字 | 遷移後の状態 |
-| `{{ env.<NAME> }}` | 環境変数 | 環境変数 | 環境変数 | 環境変数 |
-| `{{ steps.<id>.output }}` | `capture: true` の前段ステップの stdout（trailing newline 除去） | 同左 | 同左 | 同左 |
+| `{{ event.from_state }}` | 空文字 | 空文字 | 空文字 | 直前の monitor state |
+| `{{ event.to_state }}` | 空文字 | 空文字 | 空文字 | 現在の monitor state |
+| `{{ env.<NAME> }}` | `process.env[NAME]` | 同左 | 同左 | 同左 |
 
-`{{ ... }}` は `${VAR}` に展開されるだけなので、空白や改行を含みうる値は **必ずダブルクオートで囲む**：
+エージェントの Bash tool 子プロセスには次が env として追加される:
 
-```yaml
-bash: |
-  echo "matched: {{ event.line }}"     # 良い
-  echo matched: {{ event.line }}       # 危険：IFS で単語分割される
-```
-
-`bash` ステップには下記の env も渡される（`{{ ... }}` は使わない）:
-
-| Env | 内容 |
-|---|---|
-| `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` / `MIHARI_EVENT_LOG_STREAM` | `event.*` テンプレと同じ値 |
-| `MIHARI_EVENT_MONITOR_ID` / `MIHARI_EVENT_MONITOR_NAME` / `MIHARI_EVENT_FROM_STATE` / `MIHARI_EVENT_TO_STATE` | `event.*` テンプレと同じ値（`datadog_monitors` トリガーのみ値が入る） |
-| `MIHARI_STEP_<ID>` | `capture: true` の前段ステップの stdout（id を大文字化、`-` は `_` に） |
-| `MIHARI_IDEMPOTENCY_KEY` | (runbook id, トリガーイベント) ペアに対して決定的な 12 文字 sha1 hex。`claude_agent` の組み込み規約も同じ値を使う |
+- `MIHARI_IDEMPOTENCY_KEY` — runbook id と trigger event から決定的に算出する 12 桁 hex。同じトリガーが再観測されたら同じキーになる。Jira issue 検索の JQL や branch 名に混ぜて重複検知に使う
 
 ## バリデーション
 
 ```bash
-mihari validate runbooks/disk-full.yaml
-mihari validate runbooks/                # ディレクトリ指定で全件
+mihari validate runbooks/dd-monitor-jira.yaml
+mihari validate runbooks/                # ディレクトリを渡すと中身を全部検証
 ```
 
 ## サンプル
 
-`runbooks/examples/` 参照：
+`runbooks/examples/` を参照:
 
-- `disk-full.yaml` — ディスクフル時の tmp クリーンアップ（file）
-- `ssh-failed-login.yaml` — SSH 認証失敗の検知（file）
-- `api-health.yaml` — HTTP ヘルスチェック（cron + curl）
-- `backup-freshness.yaml` — バックアップ鮮度チェック（cron）
-- `k8s-pod-restart-summary.yaml` — Pod restart 数の定期集計（cron + capture）
-- `error-analysis.yaml` — Claude でエラーログを分析し修正案を提示（file + claude ステップ）
-- `error-fix-pr.yaml` — Claude にバグ修正・push・PR 作成までやらせる（file + claude agent ステップ）
-- `aws-cloudwatch-logs-error-alert.yaml` — CloudWatch Logs の ERROR を 1 件ごとに通知（aws_cloudwatch_logs）
-- `datadog-monitor-alert.yaml` — Datadog Monitor の `alert` 遷移を通知（datadog_monitors）
+- `dd-monitor-jira.yaml` — Datadog monitor 遷移 → Jira 起票/クローズ（datadog_monitors トリガー + datadog/jira provider）
+- `file-slack-alert.yaml` — アプリログ ERROR → Slack 一次切り分け（file トリガー + slack provider）
+- `cron-health-agent.yaml` — 定期 health check → 失敗時 Slack 通知（cron トリガー + slack provider）
+- `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack 一次切り分け（aws_cloudwatch_logs トリガー + slack provider）

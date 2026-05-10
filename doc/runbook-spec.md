@@ -12,8 +12,10 @@ description: ...           # Optional.
 enabled: true              # Optional. When false, daemon/poll skips firing (default true).
 cooldown_sec: 300          # Optional. Suppress refiring within N seconds of the last fire.
 trigger: ...               # Required. file, cron, aws_cloudwatch_logs, or datadog_monitors.
-steps: [ ... ]             # Required. At least one entry.
+agent: ...                 # Required. Single Claude agent block.
 ```
+
+A 1.0 runbook has exactly one `agent:`. The `steps:` list from 0.x has been removed; the loader rejects any runbook that still defines it.
 
 ## Triggers
 
@@ -58,20 +60,7 @@ trigger:
   interval_sec: 60
 ```
 
-| Field | Purpose |
-|----------|------|
-| `region` | AWS region. Required for unambiguous SDK config and state-key uniqueness |
-| `log_group` | CloudWatch Logs log group name |
-| `pattern` | Optional regex applied client-side to each event's message. Omit to match every event |
-| `interval_sec` | Polling interval in seconds. Required (AWS API calls cost money — make this explicit) |
-
-Semantics mirror the `file` trigger: each matched event fires the runbook once, and on first observation no historical events are pulled (cursor seeds at "now").
-
-State (cursor) lives at `~/.mihari/state/aws-cloudwatch-logs/<sha1(region|log_group)>.json`. Cursor write failure is fail-open (warn log, processing continues).
-
-Authentication is delegated entirely to the AWS SDK default credential chain (env vars / `~/.aws/credentials` / IAM role). mihari exposes no auth fields. The SDK is dynamically imported only when at least one runbook uses this trigger.
-
-If two runbooks subscribe to the same `(region, log_group)` they share one poller; the effective `interval_sec` is the minimum of the subscribers.
+Authentication is delegated entirely to the AWS SDK default credential chain (env vars / `~/.aws/credentials` / IAM role). mihari exposes no auth fields. The SDK is dynamically imported only when at least one runbook uses this trigger. If two runbooks subscribe to the same `(region, log_group)` they share one poller; the effective `interval_sec` is the minimum of the subscribers.
 
 ### `datadog_monitors`
 
@@ -87,194 +76,88 @@ trigger:
   interval_sec: 60
 ```
 
-| Field | Purpose |
-|----------|------|
-| `site` | Datadog site (`datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com`, etc.). Required for unambiguous SDK config and state-key uniqueness |
-| `monitor_tags` | Optional list of tag filters (`["env:prod", "service:web"]`). Forwarded to the SDK as a comma-separated `monitorTags`. Omit to observe every monitor on the site |
-| `transitions` | Optional list of "to" states to fire on. Allowed: `alert` / `warn` / `no_data` / `ok` / `skipped` / `ignored` / `unknown`. Default `["alert"]` |
-| `interval_sec` | Polling interval in seconds. Required (Datadog API calls cost rate budget — make this explicit) |
+Authentication: mihari reads `DD_API_KEY` and `DD_APP_KEY` from the environment and passes them straight to the SDK. If two runbooks subscribe to the same `(site, monitor_tags)` they share one poller; different `transitions` filters across those subscribers are honored independently in the matcher.
 
-The trigger fires once per detected state transition (e.g. `ok -> alert`). Semantics mirror `aws_cloudwatch_logs`: on first observation no historical events are emitted; the cursor (current per-monitor `overall_state` map) is just seeded.
-
-State (the per-monitor state map) lives at `~/.mihari/state/datadog-monitors/<sha1(site|sorted-monitor_tags)>.json`. Cursor write failure is fail-open (warn log, processing continues).
-
-Authentication: mihari reads `DD_API_KEY` and `DD_APP_KEY` from the environment and passes them straight to the SDK. mihari exposes no auth fields. The SDK is dynamically imported only when at least one runbook uses this trigger.
-
-If two runbooks subscribe to the same `(site, monitor_tags)` they share one poller; the effective `interval_sec` is the minimum of the subscribers. Different `transitions` filters across those subscribers are honored independently in the matcher.
-
-## Steps
-
-### `bash`
+## Agent
 
 ```yaml
-- id: cleanup
-  bash: |
-    df -h /var
-    /usr/local/bin/cleanup-tmp.sh
-  timeout_sec: 60          # default 60
-  on_error: stop           # stop | continue (default stop)
-  env:
-    APP_ENV: prod
-  capture: false           # true streams stdout to later steps (default false)
-  condition: on_success    # always | on_success | on_failure (no default)
+agent:
+  prompt: |
+    Investigate {{ event.line }} and decide what to do.
+  prompt_file: prompts/investigate.md     # mutually exclusive with prompt
+  system: You are an on-call agent.       # optional
+  system_file: prompts/system.md          # optional, mutually exclusive with system
+  model: claude-opus-4-7                  # default claude-opus-4-7
+
+  providers:                              # optional, opt-in SaaS preambles
+    - datadog
+    - jira
+    - slack
+
+  allowed_tools:                          # required, non-empty
+    - Read
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+    - "Bash(git status:*)"
+
+  permission_mode: strict                 # strict (default) | bypass
+  max_turns: 30                           # default 30
+  timeout_sec: 600                        # default 600
+  conventions: false                      # default. opt-in for the PR-idempotency preamble
+  cwd: /home/user/work                    # absolute path. default: process.cwd()
 ```
 
 | Field | Purpose |
 |----------|------|
-| `bash` | Shell script body (multi-line supported) |
-| `timeout_sec` | Timeout in seconds (SIGTERM on overrun, then SIGKILL 1 second later) |
-| `on_error` | `stop`: abort the runbook on failure / `continue`: proceed to the next step |
-| `env` | Additional environment variables |
-| `capture` | When `true`, stdout is stored and is available to later steps as `{{ steps.<id>.output }}`. stdout from a failed step is not stored. |
-| `condition` | Execution condition. `on_failure`: run when any prior step failed / `always`: always run / `on_success`: run only when all prior steps succeeded. When omitted, only the `on_error: stop` abort rule applies (previous behaviour). |
+| `prompt` / `prompt_file` | Prompt text or file (mutually exclusive; one is required) |
+| `system` / `system_file` | System prompt text or file (optional; mutually exclusive) |
+| `model` | Model id (default `claude-opus-4-7`) |
+| `providers` | Optional list of preamble opt-ins. Each name appends a Datadog/Jira/Slack-specific preamble onto the system prompt. See "Providers" below. |
+| `allowed_tools` | Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. Must be non-empty. |
+| `permission_mode` | `strict` (every tool call goes through `canUseTool`) or `bypass` (sets `allowDangerouslySkipPermissions`). |
+| `max_turns` | Maximum agentic turns. mihari default `30`. |
+| `timeout_sec` | Wall-clock timeout for the whole agent run. mihari default `600`. |
+| `cwd` | Absolute path the agent operates in. Defaults to mihari's startup directory. |
+| `conventions` | When `true`, mihari prepends an idempotency preamble instructing the agent to use `claude/fix-$MIHARI_IDEMPOTENCY_KEY` as the branch name and to skip when an existing branch / open PR / dirty tree is detected. The preamble references `git status:*`, `git ls-remote:*`, and `gh pr list:*`; allow those in `allowed_tools` if you turn it on. Default `false`. |
 
-`condition: on_failure` runs even after an `on_error: stop` abort. Useful for failure-notification steps:
+The composed system prompt order is `[conventions preamble (if true)] → [provider preambles in declared order] → [user system]`.
 
-```yaml
-steps:
-  - id: main
-    bash: /usr/local/bin/cleanup.sh
-    on_error: stop
+## Providers
 
-  - id: notify
-    condition: on_failure
-    bash: printf '%s\tfailed\n' "{{ event.timestamp }}" >> /var/log/mihari/alerts.log
-    on_error: continue
-```
+Declaring `agent.providers: [...]` inserts service-specific preambles into the system prompt. Authentication stays in environment variables (mihari never puts secrets in YAML).
 
-stdout / stderr are recorded in the logs and the history JSONL.
+| Provider | Required env | Preamble content |
+|---|---|---|
+| `datadog` | `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE` | curl pattern with the API/APP key headers, common endpoints (monitor / events / metric query) |
+| `jira` | `JIRA_BASE`, `JIRA_USER`, `JIRA_TOKEN` | curl pattern with basic auth, search/create/transition endpoints, idempotency pattern using `MIHARI_IDEMPOTENCY_KEY` |
+| `slack` | `SLACK_WEBHOOK_URL` | incoming webhook curl pattern |
+
+Missing required env at startup is a warning, not a fatal — mihari keeps running so the agent surfaces the failure when it actually tries to call the API.
 
 ## Variables
 
-Templates are expanded with `{{ ... }}`. Values are passed in as environment variables, so injection text mixed into log lines is safe.
+Templates are expanded with `{{ ... }}` inside `agent.prompt` and `agent.system` (and the corresponding `_file` variants).
 
 | Variable | `file` | `cron` | `aws_cloudwatch_logs` | `datadog_monitors` |
 |------|--------|--------|---|---|
 | `{{ event.line }}` | The matched line | Empty string | The event message | Empty string |
 | `{{ event.path }}` | Path to the log file | Empty string | The log group name | Empty string |
-| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing (ISO 8601) | Event timestamp (ISO 8601) | Time the transition was observed (ISO 8601) |
+| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing | Event timestamp | Time the transition was observed |
 | `{{ event.log_stream }}` | Empty string | Empty string | The log stream name | Empty string |
 | `{{ event.monitor_id }}` | Empty string | Empty string | Empty string | Datadog monitor id |
 | `{{ event.monitor_name }}` | Empty string | Empty string | Empty string | Datadog monitor name |
 | `{{ event.from_state }}` | Empty string | Empty string | Empty string | Previous monitor state |
 | `{{ event.to_state }}` | Empty string | Empty string | Empty string | Current monitor state |
-| `{{ env.<NAME> }}` | Environment variable | Environment variable | Environment variable | Environment variable |
-| `{{ steps.<id>.output }}` | stdout of an earlier step with `capture: true` (trailing newline stripped) | same | same | same |
+| `{{ env.<NAME> }}` | `process.env[NAME]` | same | same | same |
 
-`{{ ... }}` simply expands to `${VAR}`, so values that may contain spaces or newlines **must be double-quoted**:
+Inside the agent's Bash tool, mihari additionally injects:
 
-```yaml
-bash: |
-  echo "matched: {{ event.line }}"     # Good
-  echo matched: {{ event.line }}       # Dangerous: IFS word-splits the value
-```
-
-`bash` steps additionally receive these env vars (no `{{ ... }}` form):
-
-| Env var | Meaning |
-|---|---|
-| `MIHARI_EVENT_LINE` / `MIHARI_EVENT_PATH` / `MIHARI_EVENT_TIMESTAMP` / `MIHARI_EVENT_LOG_STREAM` | Same as the `event.*` template variables |
-| `MIHARI_EVENT_MONITOR_ID` / `MIHARI_EVENT_MONITOR_NAME` / `MIHARI_EVENT_FROM_STATE` / `MIHARI_EVENT_TO_STATE` | Same as the `event.*` template variables (populated only on `datadog_monitors` triggers) |
-| `MIHARI_STEP_<ID>` | stdout of an earlier `capture: true` step (id uppercased, `-` → `_`) |
-| `MIHARI_IDEMPOTENCY_KEY` | 12-char sha1 hex deterministic for the (runbook id, trigger event) pair. See `claude_agent` for how it is used by the built-in idempotency conventions. |
-
-### `claude`
-
-```yaml
-- id: analyze-error
-  claude:
-    prompt: |
-      Error: {{ event.line }}
-      Context: {{ steps.get-context.output }}
-    prompt_file: prompts/analyze.md    # mutually exclusive with prompt (path relative to runbook YAML)
-    system: You are a DevOps expert.   # optional
-    system_file: prompts/system.md     # mutually exclusive with system (optional)
-    model: claude-opus-4-7             # default claude-opus-4-7
-    max_tokens: 1024                   # default 1024
-  timeout_sec: 60
-  on_error: stop
-  capture: true
-  condition: on_failure
-```
-
-| Field | Purpose |
-|----------|------|
-| `claude.prompt` | Prompt text (`prompt_file` is mutually exclusive; one is required) |
-| `claude.prompt_file` | Path to a prompt file (relative to the runbook YAML directory; read at startup) |
-| `claude.system` | System prompt (optional; mutually exclusive with `system_file`) |
-| `claude.system_file` | Path to a system-prompt file (optional; mutually exclusive with `system`) |
-| `claude.model` | Model to use (default `claude-opus-4-7`) |
-| `claude.max_tokens` | Maximum output tokens (default 1024). Single-shot mode only; ignored when `agent: true`. |
-| `timeout_sec` | Timeout in seconds (default 60) |
-| `on_error` | `stop` / `continue` (default `stop`) |
-| `capture` | When `true`, the API response is available to later steps as `{{ steps.<id>.output }}` |
-| `condition` | `always` / `on_success` / `on_failure` (same as bash steps) |
-
-Template variables (`{{ event.line }}` etc.) are expanded via direct string substitution at runtime. `ANTHROPIC_API_KEY` must be set in the environment. A `stop_reason: max_tokens` response is treated as a step failure.
-
-### `claude_agent`
-
-A separate step type that runs the Claude Agent SDK with file edit tools (`Read`, `Edit`, `Write`) and `Bash`. Use this for code changes, commits, and PR creation. The captured output is the agent's final assistant message. Single-shot prompting belongs in `claude:`; this step is for runs with side effects.
-
-```yaml
-- id: fix-and-pr
-  claude_agent:
-    prompt: |
-      An error occurred: {{ event.line }}
-      Investigate, fix it on a new branch, push, and open a PR.
-    system: You are working on the repository at the given cwd.   # optional
-    model: claude-opus-4-7                                          # default
-    allowed_tools:
-      - Read
-      - Edit
-      - Write
-      - "Bash(git status)"
-      - "Bash(git diff:*)"
-      - "Bash(git switch:*)"
-      - "Bash(git add:*)"
-      - "Bash(git commit:*)"
-      - "Bash(git push:*)"
-      - "Bash(gh pr create:*)"
-    permission_mode: strict       # strict (default) | bypass
-    max_turns: 30
-    cwd: /home/user/myrepo
-  timeout_sec: 600
-  on_error: stop
-  capture: true
-```
-
-| Field | Purpose |
-|----------|------|
-| `claude_agent.prompt` / `prompt_file` | Prompt text or file (mutually exclusive; one is required) |
-| `claude_agent.system` / `system_file` | System prompt text or file (optional; mutually exclusive) |
-| `claude_agent.model` | Model to use (default `claude-opus-4-7`) |
-| `claude_agent.allowed_tools` | **Required.** Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. Must be non-empty. |
-| `claude_agent.permission_mode` | `strict` (default; every tool call goes through `canUseTool` and is denied unless it matches `allowed_tools`) or `bypass` (every tool runs; sets `allowDangerouslySkipPermissions`) |
-| `claude_agent.max_turns` | Maximum agentic turns before the SDK stops (no default — SDK default applies) |
-| `claude_agent.cwd` | Absolute path the agent operates in. Defaults to the directory mihari was started in. |
-| `claude_agent.conventions` | When `true`, mihari prepends an idempotency preamble to the system prompt instructing the agent to use `claude/fix-$MIHARI_IDEMPOTENCY_KEY` as the branch name and to skip when an existing branch / open PR / dirty tree is detected. **Default `false`** — opt in explicitly when the runbook opens PRs and is willing to grant the necessary tools (see below). |
-
-#### Built-in idempotency conventions
-
-`MIHARI_IDEMPOTENCY_KEY` — a 12-character sha1 hex computed deterministically from the runbook id and the trigger event (file path + line, cron slot, or manual timestamp) — is **always** exported as an env var to both bash steps and to the agent's Bash tool. The same trigger observed twice produces the same key.
-
-Setting `conventions: true` additionally appends a fixed **operations preamble** ahead of the user-supplied `system` prompt. The preamble instructs the agent that, *if* its task involves opening a PR in a git repo, it must (a) abort on dirty tree, (b) skip when a branch named `claude/fix-$MIHARI_IDEMPOTENCY_KEY` already exists, (c) skip when an open PR mentions the key in its title, and (d) otherwise create the branch and PR using that exact name. For non-PR tasks (write a status file, run a migration, etc.) the agent is told to ignore the preamble.
-
-The preamble references `git status:*`, `git ls-remote:*`, and `gh pr list:*`. If you turn it on, your `allowed_tools` must grant those patterns or `canUseTool` will deny the mandated checks. The default is `false` precisely because the preamble would otherwise demand tools the runbook may not have allowlisted.
-
-Stage control is purely a function of `allowed_tools`:
-
-| Range | Add to `allowed_tools` |
-|---|---|
-| Edit-only | `Read` `Edit` `Write` |
-| + local commit | + `Bash(git status)` `Bash(git diff:*)` `Bash(git switch:*)` `Bash(git add:*)` `Bash(git commit:*)` |
-| + push | + `Bash(git push:*)` |
-| + PR | + `Bash(gh pr create:*)` |
+- `MIHARI_IDEMPOTENCY_KEY` — a 12-char sha1 hex deterministic for the (runbook id, trigger event) pair. Same trigger observed twice → same key. Use it to detect duplicate work in Jira issue searches, branch names, etc.
 
 ## Validation
 
 ```bash
-mihari validate runbooks/disk-full.yaml
+mihari validate runbooks/dd-monitor-jira.yaml
 mihari validate runbooks/                # Pass a directory to validate everything inside
 ```
 
@@ -282,12 +165,7 @@ mihari validate runbooks/                # Pass a directory to validate everythi
 
 See `runbooks/examples/`:
 
-- `disk-full.yaml` — Cleans up tmp on disk-full alerts (file)
-- `ssh-failed-login.yaml` — Detects SSH authentication failures (file)
-- `api-health.yaml` — HTTP health check (cron + curl)
-- `backup-freshness.yaml` — Backup-freshness check (cron)
-- `k8s-pod-restart-summary.yaml` — Periodic Pod-restart aggregation (cron + capture)
-- `error-analysis.yaml` — Analyzes error logs with Claude and suggests remediation (file + claude step)
-- `error-fix-pr.yaml` — Lets Claude fix the bug, push a branch, and open a PR (file + claude agent step)
-- `aws-cloudwatch-logs-error-alert.yaml` — Alerts on CloudWatch Logs ERROR events (aws_cloudwatch_logs)
-- `datadog-monitor-alert.yaml` — Notifies on Datadog Monitor transitions into `alert` (datadog_monitors)
+- `dd-monitor-jira.yaml` — Datadog monitor transitions → Jira create/close (datadog_monitors trigger + datadog/jira providers)
+- `file-slack-alert.yaml` — Application log ERROR → Slack triage (file trigger + slack provider)
+- `cron-health-agent.yaml` — Periodic health check → Slack on failure (cron trigger + slack provider)
+- `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack triage (aws_cloudwatch_logs trigger + slack provider)

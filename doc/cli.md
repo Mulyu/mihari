@@ -53,7 +53,7 @@ mihari poll --dry-run
 Runs a runbook without a trigger. `event` is `{type: "manual", timestamp: now}`.
 
 ```bash
-mihari run disk-full-cleanup
+mihari run dd-monitor-jira
 ```
 
 ## `mihari list`
@@ -77,11 +77,10 @@ mihari status
 Sample output (tab-separated):
 
 ```
-disk-full-cleanup   file:/var/log/myapp.log                        2026-04-29T02:11Z   ok    -
-api-health          cron:*/5 * * * *                               2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
-backup-freshness    cron:0 9 * * *                                 2026-04-28T09:00Z   ok    2026-04-29T09:00Z
-lambda-error-alert  aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03:00Z   ok    -
-dd-monitor-alert    datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
+file-slack-alert    file:/var/log/myapp.log                        2026-04-29T02:11Z   ok    -
+cron-health-agent   cron:*/5 * * * *                               2026-04-29T03:05Z   FAIL  2026-04-29T03:10Z
+cw-error-triage     aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03:00Z   ok    -
+dd-monitor-jira     datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
 ```
 
 Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for `file`, `aws_cloudwatch_logs`, and `datadog_monitors` triggers.
@@ -91,7 +90,7 @@ Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column
 Validates the syntax and schema of runbook YAML. Exits with code 1 on error.
 
 ```bash
-mihari validate runbooks/disk-full.yaml
+mihari validate runbooks/dd-monitor-jira.yaml
 mihari validate runbooks/
 ```
 
@@ -101,7 +100,7 @@ Shows execution history. Without arguments, lists recent runs; with a `run_id`, 
 
 ```bash
 mihari history                              # 20 most recent
-mihari history --runbook api-health
+mihari history --runbook dd-monitor-jira
 mihari history --since 2026-04-25 --limit 5
 mihari history --json
 mihari history run_abc12345                 # detail of a single run

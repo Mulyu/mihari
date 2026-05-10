@@ -277,13 +277,31 @@ function readJsonlFile(file: string): RunResult[] {
   const out: RunResult[] = [];
   for (const line of text.split("\n")) {
     if (!line) continue;
+    let obj: unknown;
     try {
-      out.push(JSON.parse(line) as RunResult);
+      obj = JSON.parse(line);
     } catch {
       log.warn({ file }, "skipping malformed run record line");
+      continue;
     }
+    if (!isRunResultShape(obj)) {
+      log.warn({ file }, "skipping run record from a pre-1.0 schema (no agent field)");
+      continue;
+    }
+    out.push(obj);
   }
   return out;
+}
+
+function isRunResultShape(v: unknown): v is RunResult {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o["run_id"] === "string" &&
+    typeof o["runbook_id"] === "string" &&
+    typeof o["agent"] === "object" &&
+    o["agent"] !== null
+  );
 }
 
 export function defaultStateDir(): string {

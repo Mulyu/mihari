@@ -2,7 +2,7 @@
 
 > [日本語](./README.ja.md) | **English**
 
-A CLI that runs bash runbooks in response to local log files, cron schedules, or CloudWatch Logs.
+A CLI that runs bash runbooks in response to local log files, cron schedules, CloudWatch Logs, or Datadog Monitors.
 
 > mihari (見張り, "watcher") — a lightweight engine that watches your logs and runs predetermined responses automatically.
 
@@ -11,6 +11,7 @@ A CLI that runs bash runbooks in response to local log files, cron schedules, or
 - Polls log files periodically (tail-equivalent). When a new line matches a regular expression, the runbook fires.
 - Time-based scheduling via cron expressions (write HTTP checks as `bash` + `curl`).
 - Polls CloudWatch Logs streams (parallel to local file tail; AWS SDK loaded only when used).
+- Polls Datadog Monitors and fires on state transitions (e.g. `ok -> alert`); Datadog SDK loaded only when used.
 - Runbooks are made of `bash`, `claude` (single-shot Anthropic API call), and `claude_agent` (Agent SDK loop with file-edit / Bash tools) steps.
 - File offsets / firing timestamps are persisted under `~/.mihari/state/`.
 

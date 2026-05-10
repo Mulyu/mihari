@@ -32,6 +32,17 @@ export function computeIdempotencyKey(runbookId: string, event: TriggerEvent): s
     // CloudWatch Logs の eventId は (group, stream, ingestion) で一意。同じ event を
     // 再観測したら同じキーになる。
     hash.update(event.event_id);
+  } else if (event.type === "datadog_monitor") {
+    hash.update("datadog_monitor\0");
+    hash.update(event.site);
+    hash.update("\0");
+    hash.update(event.monitor_id);
+    hash.update("\0");
+    // 同じ monitor の同じ遷移ペアを再観測したら同じキー。タイムスタンプは含めない
+    // （再観測のたびに別キーになると idempotency の意味がなくなるため）。
+    hash.update(event.from_state);
+    hash.update("\0");
+    hash.update(event.to_state);
   } else {
     hash.update("manual\0");
     hash.update(event.timestamp);

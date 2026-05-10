@@ -4,11 +4,12 @@
 
 ## プロジェクト概要
 
-**mihari** はローカルのログファイル、cron スケジュール、または CloudWatch Logs に反応して bash ランブックを実行する CLI。
+**mihari** はローカルのログファイル、cron スケジュール、CloudWatch Logs、または Datadog Monitor に反応して bash ランブックを実行する CLI。
 
 - `file` トリガー: ログファイルを tail し、新規行が正規表現にマッチで発火
 - `cron` トリガー: 5フィールド cron 式で定期発火
 - `aws_cloudwatch_logs` トリガー: CloudWatch Logs を `interval_sec` 間隔でポーリングし、event 1 件ごとに発火
+- `datadog_monitors` トリガー: Datadog Monitor を `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
 - ステップは `bash` / `claude`（単発）/ `claude_agent`（副作用あり、Agent SDK）の3種別
 - state は `~/.mihari/state/` にローカル保存
 
@@ -55,7 +56,8 @@ mihari/
 │   ├── triggers/               # YAML の trigger.source に対応する取得元
 │   │   ├── file.ts             # FilePoller（offset/inode/size 判定）
 │   │   ├── cron.ts             # CronScheduler（croner で発火判定）
-│   │   └── aws-cloudwatch-logs.ts  # AwsCloudWatchLogsPoller（FilterLogEvents + cursor）
+│   │   ├── aws-cloudwatch-logs.ts  # AwsCloudWatchLogsPoller（FilterLogEvents + cursor）
+│   │   └── datadog-monitors.ts # DatadogMonitorsPoller（listMonitors + per-monitor state diff）
 │   ├── steps/                  # 各ステップの実行
 │   │   ├── template.ts         # 共有テンプレ展開（bash / claude 両方）
 │   │   ├── bash-step.ts        # spawn bash（注入安全）
@@ -91,6 +93,13 @@ Dispatcher.tick():
         # enabled / cooldown チェックは file と同じ
         executor.execute(m.runbook, m.event)
 
+  for DatadogMonitorsPoller:
+    events = poller.tick(now, dryRun)   # DatadogMonitorEvent[]
+    for event:
+      for m in matcher.matchDatadogMonitor(event, runbooks):
+        # enabled / cooldown チェックは file と同じ
+        executor.execute(m.runbook, m.event)
+
   for CronScheduler:
     if runbook.enabled === false: skip
     event = scheduler.tick(now, dryRun) # CronEvent | null
@@ -112,16 +121,17 @@ Executor:
 - `on_failure`: `anyFailed || stopped` のとき実行
 - `on_success`: `!anyFailed && !stopped` のとき実行
 
-`TriggerEvent` は識別共用体（`type: "file" | "cron" | "manual" | "aws_cloudwatch_logs"`）。`bash-step` は `event.type` で `MIHARI_EVENT_LINE` `MIHARI_EVENT_PATH` `MIHARI_EVENT_LOG_STREAM` を埋めるか空文字にする。`event.timestamp` は常に存在。
+`TriggerEvent` は識別共用体（`type: "file" | "cron" | "manual" | "aws_cloudwatch_logs" | "datadog_monitor"`）。`bash-step` は `event.type` で `MIHARI_EVENT_LINE` `MIHARI_EVENT_PATH` `MIHARI_EVENT_LOG_STREAM` を埋めるか空文字にする。`datadog_monitor` の場合は加えて `MIHARI_EVENT_MONITOR_ID` `MIHARI_EVENT_MONITOR_NAME` `MIHARI_EVENT_FROM_STATE` `MIHARI_EVENT_TO_STATE` を埋める（他種別では空文字）。`event.timestamp` は常に存在。
 
 ## State 配置
 
 ```
 ~/.mihari/state/
-├── pollers/<sha1(path)>.json                  # FilePoller オフセット
-├── triggers/<sha1(runbook_id)>.json           # CronScheduler last_fired_at
-├── aws-cloudwatch-logs/<sha1(region|group)>.json  # AwsCloudWatchLogsPoller cursor
-└── runs/<YYYY-MM-DD>/<run_id>.jsonl           # 実行履歴
+├── pollers/<sha1(path)>.json                                # FilePoller オフセット
+├── triggers/<sha1(runbook_id)>.json                         # CronScheduler last_fired_at
+├── aws-cloudwatch-logs/<sha1(region|group)>.json            # AwsCloudWatchLogsPoller cursor
+├── datadog-monitors/<sha1(site|sorted-monitor_tags)>.json   # DatadogMonitorsPoller per-monitor state map
+└── runs/<YYYY-MM-DD>/<run_id>.jsonl                         # 実行履歴
 ```
 
 書き込みは `proper-lockfile` でロック → tmp ファイル書き → `rename()` で atomic 置換。書き込み失敗は warn ログだけ残して続行（fail-open）。
@@ -160,6 +170,22 @@ Executor:
 - 同じ `(region, log_group)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され `interval_sec` は最小値が採用される
 - AWS SDK は `aws_cloudwatch_logs` ランブックがある時だけ動的 import（`claude_agent` と同パターン）。認証は SDK 標準チェーンに完全委譲し、mihari は `region` 以外の AWS 固有フィールドを持たない
 
+### `DatadogMonitorsPoller`
+
+| 状態 | 判定 | 対応 |
+|-----|------|------|
+| stateなし | 初回 | 全 monitor の現在 `overall_state` を保存して終了（発火せず seed） |
+| `now - last_polled_at < interval_sec` | interval 未経過 | 何もしない（API も叩かない） |
+| 上記以外 | poll | `listMonitors({ monitorTags, page, pageSize: 100 })` を hasMore が落ちるまで取得 |
+
+- 初回観測: `file` / `aws_cloudwatch_logs` と対称で履歴を遡らない
+- 状態遷移検出: 前回 state の `monitor_states[id]` と現在 `overall_state` を比較。差分があれば 1 件 event を emit。`transitions` フィルタは matcher 側で適用（同 key を異なる `transitions` で複数 runbook が購読できる）
+- 新規 monitor: 初回観測扱いで発火しない（次回 tick から差分検出対象に入る）
+- state 書き戻し: 「前回 state ∪ 今回観測分」の merge。Datadog 上で削除された monitor は state にゴミとして残るが、観測されない以上 transition も emit されない（fail-open）
+- pagination: hop cap なし。`hasMore` が落ちるまで取り切る（listMonitors は monitor 定義一覧で O(monitor 数)、バーストがない前提）
+- 同じ `(site, monitor_tags)` を購読する複数ランブックがあれば、ポーラーは 1 つに集約され `interval_sec` は最小値が採用される
+- Datadog SDK は `datadog_monitors` ランブックがある時だけ動的 import。認証は環境変数 `DD_API_KEY` / `DD_APP_KEY` から読み SDK にそのまま渡す。mihari は YAML に認証フィールドを置かない（`site` のみ）
+
 ## 失敗モードと対応
 
 | 失敗 | 対応 |
@@ -190,6 +216,7 @@ Executor:
 | Claude API（単発） | `@anthropic-ai/sdk` |
 | Claude エージェント | `@anthropic-ai/claude-agent-sdk`（claude-step の `agent: true` 時のみ動的 import） |
 | CloudWatch Logs | `@aws-sdk/client-cloudwatch-logs`（`aws_cloudwatch_logs` トリガーが存在する時のみ動的 import） |
+| Datadog Monitors | `@datadog/datadog-api-client`（`datadog_monitors` トリガーが存在する時のみ動的 import） |
 
 ## コーディング規約
 

@@ -1,4 +1,4 @@
-export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger;
+export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger | DatadogMonitorsTrigger;
 
 export type Step = BashStep | ClaudeStep | ClaudeAgentStep;
 
@@ -31,6 +31,27 @@ export interface AwsCloudWatchLogsTrigger {
   region: string;
   log_group: string;
   pattern?: RegExp;
+  interval_sec: number;
+}
+
+// Datadog Monitor の状態遷移をポーリングで観測するトリガー。
+// site は明示必須（datadoghq.com / datadoghq.eu / us3.datadoghq.com 等。state key の同一性を担保）。
+// monitor_tags は Datadog SDK の monitorTags フィルタへ渡すタグ配列（任意。空なら全 monitor が対象）。
+// transitions は拾う遷移の "to" 状態のリスト（デフォルト ["alert"]）。状態語彙は loader 側で固定する。
+export type DatadogMonitorState =
+  | "alert"
+  | "warn"
+  | "no_data"
+  | "ok"
+  | "skipped"
+  | "ignored"
+  | "unknown";
+
+export interface DatadogMonitorsTrigger {
+  source: "datadog_monitors";
+  site: string;
+  monitor_tags?: string[];
+  transitions: DatadogMonitorState[];
   interval_sec: number;
 }
 
@@ -102,6 +123,16 @@ export type TriggerEvent =
       event_id: string;
       timestamp: string;
       timestamp_ms: number;
+    }
+  | {
+      type: "datadog_monitor";
+      site: string;
+      monitor_tags: string[];
+      monitor_id: string;
+      monitor_name: string;
+      from_state: DatadogMonitorState;
+      to_state: DatadogMonitorState;
+      timestamp: string;
     };
 
 // 全ステップ実行時に渡される共通コンテキスト。
@@ -138,6 +169,18 @@ export interface AwsCloudWatchLogsPollerState {
   log_group: string;
   last_event_timestamp_ms: number;
   last_event_ids: string[];
+  last_polled_at: string;
+}
+
+// Datadog Monitor poller の cursor。
+// 観測した monitor id ごとの最終状態を保持し、次回 tick で差分を取って遷移を検出する。
+// `monitor_tags` を含むのは集約キーと state ファイル名の整合のため（監査用に冗長保存）。
+// `monitor_states` は「前回 state ∪ 今回観測分」の merge で書き戻す（削除検知は諦め、
+// fail-open 寄りで欠落より残す側に倒す）。
+export interface DatadogMonitorsPollerState {
+  site: string;
+  monitor_tags: string[];
+  monitor_states: Record<string, DatadogMonitorState>;
   last_polled_at: string;
 }
 

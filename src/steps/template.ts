@@ -1,9 +1,11 @@
 import type { StepContext } from "../types/index.js";
 
 // 全ステップで共通のテンプレ字句構造。
-// 拾うキー: event.line / event.path / event.timestamp / env.<NAME> / steps.<id>.output
+// 拾うキー: event.line / event.path / event.timestamp / event.log_stream
+//           / event.monitor_id / event.monitor_name / event.from_state / event.to_state
+//           / env.<NAME> / steps.<id>.output
 export const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|env\.[A-Za-z_][A-Za-z0-9_]*|steps\.[a-z0-9][a-z0-9-]*\.output)\s*\}\}/g;
+  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*|steps\.[a-z0-9][a-z0-9-]*\.output)\s*\}\}/g;
 
 export function normalizeStepEnvName(stepId: string): string {
   return stepId.replace(/-/g, "_").toUpperCase();
@@ -19,6 +21,10 @@ export function substituteBashTemplate(bash: string): string {
     if (key === "event.path") return "${MIHARI_EVENT_PATH}";
     if (key === "event.timestamp") return "${MIHARI_EVENT_TIMESTAMP}";
     if (key === "event.log_stream") return "${MIHARI_EVENT_LOG_STREAM}";
+    if (key === "event.monitor_id") return "${MIHARI_EVENT_MONITOR_ID}";
+    if (key === "event.monitor_name") return "${MIHARI_EVENT_MONITOR_NAME}";
+    if (key === "event.from_state") return "${MIHARI_EVENT_FROM_STATE}";
+    if (key === "event.to_state") return "${MIHARI_EVENT_TO_STATE}";
     if (key.startsWith("env.")) return `\${${key.slice(4)}}`;
     if (key.startsWith("steps.") && key.endsWith(".output")) {
       const stepId = key.slice("steps.".length, -".output".length);
@@ -45,6 +51,18 @@ export function substituteClaudeTemplate(text: string, ctx: StepContext): string
     if (key === "event.timestamp") return ctx.event.timestamp;
     if (key === "event.log_stream") {
       return ctx.event.type === "aws_cloudwatch_logs" ? ctx.event.log_stream : "";
+    }
+    if (key === "event.monitor_id") {
+      return ctx.event.type === "datadog_monitor" ? ctx.event.monitor_id : "";
+    }
+    if (key === "event.monitor_name") {
+      return ctx.event.type === "datadog_monitor" ? ctx.event.monitor_name : "";
+    }
+    if (key === "event.from_state") {
+      return ctx.event.type === "datadog_monitor" ? ctx.event.from_state : "";
+    }
+    if (key === "event.to_state") {
+      return ctx.event.type === "datadog_monitor" ? ctx.event.to_state : "";
     }
     if (key.startsWith("env.")) return process.env[key.slice(4)] ?? "";
     if (key.startsWith("steps.") && key.endsWith(".output")) {

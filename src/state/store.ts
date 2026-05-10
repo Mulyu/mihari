@@ -13,6 +13,8 @@ import lockfile from "proper-lockfile";
 import { logger } from "../lib/logger.js";
 import type {
   AwsCloudWatchLogsPollerState,
+  DatadogMonitorState,
+  DatadogMonitorsPollerState,
   PollerState,
   RunResult,
   TriggerState,
@@ -32,6 +34,7 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "pollers"), { recursive: true });
     mkdirSync(join(this.baseDir, "triggers"), { recursive: true });
     mkdirSync(join(this.baseDir, "aws-cloudwatch-logs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "datadog-monitors"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -143,6 +146,54 @@ export class StateStore {
       log.warn(
         { file, err: (e as Error).message },
         "aws-cloudwatch-logs state write failed",
+      );
+    }
+  }
+
+  datadogMonitorsStateFile(key: { site: string; monitorTags: string[] }): string {
+    const tagsPart = [...key.monitorTags].sort().join(",");
+    const hash = createHash("sha1")
+      .update(`${key.site}|${tagsPart}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "datadog-monitors", `${hash}.json`);
+  }
+
+  loadDatadogMonitorsState(key: {
+    site: string;
+    monitorTags: string[];
+  }): DatadogMonitorsPollerState | null {
+    const file = this.datadogMonitorsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateDatadogMonitorsState(obj)) {
+        log.warn({ file }, "datadog-monitors state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "datadog-monitors state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveDatadogMonitorsState(state: DatadogMonitorsPollerState): Promise<void> {
+    const file = this.datadogMonitorsStateFile({
+      site: state.site,
+      monitorTags: state.monitor_tags,
+    });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn(
+        { file, err: (e as Error).message },
+        "datadog-monitors state write failed",
       );
     }
   }
@@ -285,4 +336,29 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   const ids = o["last_event_ids"];
   if (!Array.isArray(ids)) return false;
   return ids.every((x) => typeof x === "string");
+}
+
+const DATADOG_MONITOR_STATE_VALUES: readonly DatadogMonitorState[] = [
+  "alert",
+  "warn",
+  "no_data",
+  "ok",
+  "skipped",
+  "ignored",
+  "unknown",
+];
+
+function validateDatadogMonitorsState(v: unknown): v is DatadogMonitorsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o["site"] !== "string" || typeof o["last_polled_at"] !== "string") return false;
+  const tags = o["monitor_tags"];
+  if (!Array.isArray(tags) || !tags.every((t) => typeof t === "string")) return false;
+  const states = o["monitor_states"];
+  if (typeof states !== "object" || states === null || Array.isArray(states)) return false;
+  for (const value of Object.values(states as Record<string, unknown>)) {
+    if (typeof value !== "string") return false;
+    if (!(DATADOG_MONITOR_STATE_VALUES as readonly string[]).includes(value)) return false;
+  }
+  return true;
 }

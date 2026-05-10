@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type {
   AwsCloudWatchLogsTrigger,
+  DatadogMonitorsTrigger,
   FileTrigger,
   Match,
   Runbook,
@@ -9,6 +10,7 @@ import type {
 
 type FileRunbook = Runbook & { trigger: FileTrigger };
 type AwsCloudWatchLogsRunbook = Runbook & { trigger: AwsCloudWatchLogsTrigger };
+type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
@@ -16,6 +18,10 @@ function isFileRunbook(rb: Runbook): rb is FileRunbook {
 
 function isAwsCloudWatchLogsRunbook(rb: Runbook): rb is AwsCloudWatchLogsRunbook {
   return rb.trigger.source === "aws_cloudwatch_logs";
+}
+
+function isDatadogMonitorsRunbook(rb: Runbook): rb is DatadogMonitorsRunbook {
+  return rb.trigger.source === "datadog_monitors";
 }
 
 export function match(
@@ -44,6 +50,26 @@ export function matchAwsCloudWatchLogs(
         r.trigger.log_group === event.log_group &&
         (r.trigger.pattern === undefined || r.trigger.pattern.test(event.message)),
     )
+    .map((r) => ({ runbook: r, event }));
+}
+
+// Datadog Monitor の状態遷移は poller が全件 emit する。runbook 側は
+// `(site, monitor_tags)` の購読キーが一致し、かつ `transitions` に到達状態が
+// 含まれる場合に発火する。同じ key を異なる transitions で複数 runbook が購読
+// できるよう、フィルタは matcher 側で行う。
+export function matchDatadogMonitor(
+  event: Extract<TriggerEvent, { type: "datadog_monitor" }>,
+  runbooks: Runbook[],
+): Match[] {
+  const eventTags = [...event.monitor_tags].sort().join(",");
+  return runbooks
+    .filter(isDatadogMonitorsRunbook)
+    .filter((r) => {
+      if (r.trigger.site !== event.site) return false;
+      const triggerTags = [...(r.trigger.monitor_tags ?? [])].sort().join(",");
+      if (triggerTags !== eventTags) return false;
+      return r.trigger.transitions.includes(event.to_state);
+    })
     .map((r) => ({ runbook: r, event }));
 }
 

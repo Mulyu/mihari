@@ -4,8 +4,14 @@ import type { Executor } from "../src/engine/executor.js";
 import type { CronScheduler } from "../src/triggers/cron.js";
 import type { FilePoller } from "../src/triggers/file.js";
 import type { AwsCloudWatchLogsPoller } from "../src/triggers/aws-cloudwatch-logs.js";
+import type { DatadogMonitorsPoller } from "../src/triggers/datadog-monitors.js";
 import type { StateStore } from "../src/state/store.js";
-import type { Runbook, RunResult, TriggerEvent } from "../src/types/index.js";
+import type {
+  DatadogMonitorState,
+  Runbook,
+  RunResult,
+  TriggerEvent,
+} from "../src/types/index.js";
 
 function fakeState(runs: RunResult[] = []): StateStore {
   return {
@@ -80,6 +86,57 @@ function cwRb(id: string, region: string, group: string, pattern?: RegExp): Runb
       { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
     ],
     sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function fakeDatadogMonitorsPoller(events: TriggerEvent[]): DatadogMonitorsPoller {
+  return {
+    key: { site: "datadoghq.com", monitorTags: ["env:prod"] },
+    intervalSec: 60,
+    tick: vi.fn().mockResolvedValue(events.filter((e) => e.type === "datadog_monitor")),
+  } as unknown as DatadogMonitorsPoller;
+}
+
+function ddRb(
+  id: string,
+  site: string,
+  monitorTags: string[],
+  transitions: DatadogMonitorState[],
+  extra: Partial<Runbook> = {},
+): Runbook {
+  const trigger: Runbook["trigger"] = {
+    source: "datadog_monitors",
+    site,
+    transitions,
+    interval_sec: 60,
+  };
+  if (monitorTags.length > 0) trigger.monitor_tags = monitorTags;
+  return {
+    id,
+    trigger,
+    steps: [
+      { id: "x", bash: "true", timeout_sec: 60, on_error: "stop", env: {}, capture: false },
+    ],
+    sourcePath: `/tmp/${id}.yaml`,
+    ...extra,
+  };
+}
+
+function ddEvent(
+  site: string,
+  monitorTags: string[],
+  fromState: DatadogMonitorState,
+  toState: DatadogMonitorState,
+): TriggerEvent {
+  return {
+    type: "datadog_monitor",
+    site,
+    monitor_tags: monitorTags,
+    monitor_id: "1",
+    monitor_name: "high-error-rate",
+    from_state: fromState,
+    to_state: toState,
+    timestamp: "2026-05-09T12:00:00Z",
   };
 }
 
@@ -296,6 +353,83 @@ describe("dispatcher: aws_cloudwatch_logs", () => {
   });
 });
 
+describe("dispatcher: datadog_monitors", () => {
+  it("passes datadog_monitor events through matcher to executor", async () => {
+    const rb = ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]);
+    const event = ddEvent("datadoghq.com", ["env:prod"], "ok", "alert");
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      datadogMonitorsPollers: [fakeDatadogMonitorsPoller([event])],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(1);
+    expect(exec.calls).toHaveLength(1);
+    expect(exec.calls[0]?.runbook.id).toBe("a");
+    expect(exec.calls[0]?.event).toBe(event);
+  });
+
+  it("skips datadog_monitor events whose to_state is not in transitions", async () => {
+    const rb = ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]);
+    const event = ddEvent("datadoghq.com", ["env:prod"], "ok", "warn");
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      datadogMonitorsPollers: [fakeDatadogMonitorsPoller([event])],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("emits a dryRun message including site / tags / monitor name / transition", async () => {
+    const rb = ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]);
+    const event = ddEvent("datadoghq.com", ["env:prod"], "ok", "alert");
+    const exec = fakeExecutor();
+    const seen: string[] = [];
+    const r = await tick(
+      {
+        runbooks: [rb],
+        pollers: [],
+        cronSchedulers: [],
+        datadogMonitorsPollers: [fakeDatadogMonitorsPoller([event])],
+        executor: exec,
+        state: fakeState(),
+      },
+      { dryRun: true, onDryRun: (m) => seen.push(m) },
+    );
+    expect(r.fired).toBe(1);
+    expect(exec.calls).toHaveLength(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain("a <- datadog_monitors:datadoghq.com|env:prod");
+    expect(seen[0]).toContain("high-error-rate (ok -> alert)");
+  });
+
+  it("dryRun passes dryRun=true and Date to datadog poller tick", async () => {
+    const rb = ddRb("a", "datadoghq.com", ["env:prod"], ["alert"]);
+    const exec = fakeExecutor();
+    const poller = fakeDatadogMonitorsPoller([]);
+    await tick(
+      {
+        runbooks: [rb],
+        pollers: [],
+        cronSchedulers: [],
+        datadogMonitorsPollers: [poller],
+        executor: exec,
+        state: fakeState(),
+      },
+      { dryRun: true },
+    );
+    expect(poller.tick).toHaveBeenCalledWith(expect.any(Date), true);
+  });
+});
+
 describe("dispatcher: enabled", () => {
   it("skips file runbook when enabled=false", async () => {
     const rb = fileRb("a", "/var/log/app.log", /ERROR/, { enabled: false });
@@ -325,6 +459,47 @@ describe("dispatcher: enabled", () => {
       runbooks: [rb],
       pollers: [],
       cronSchedulers: [fakeCronScheduler(rb, event)],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("skips aws_cloudwatch_logs runbook when enabled=false", async () => {
+    const rb: Runbook = { ...cwRb("a", "us-east-1", "/g", /ERROR/), enabled: false };
+    const event: TriggerEvent = {
+      type: "aws_cloudwatch_logs",
+      region: "us-east-1",
+      log_group: "/g",
+      log_stream: "s",
+      message: "ERROR boom",
+      event_id: "e1",
+      timestamp: "t",
+      timestamp_ms: 0,
+    };
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      awsCloudWatchLogsPollers: [fakeAwsCloudWatchLogsPoller([event])],
+      executor: exec,
+      state: fakeState(),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("skips datadog_monitors runbook when enabled=false", async () => {
+    const rb = ddRb("a", "datadoghq.com", ["env:prod"], ["alert"], { enabled: false });
+    const event = ddEvent("datadoghq.com", ["env:prod"], "ok", "alert");
+    const exec = fakeExecutor();
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      datadogMonitorsPollers: [fakeDatadogMonitorsPoller([event])],
       executor: exec,
       state: fakeState(),
     });
@@ -396,5 +571,93 @@ describe("dispatcher: cooldown_sec", () => {
       state: fakeState([]),  // no previous runs
     });
     expect(r.fired).toBe(1);
+  });
+
+  it("applies cooldown_sec to file events as well", async () => {
+    const rb = fileRb("a", "/var/log/app.log", /ERROR/, { cooldown_sec: 300 });
+    const event: TriggerEvent = {
+      type: "file",
+      path: "/var/log/app.log",
+      content: "ERROR: bad",
+      timestamp: "t",
+    };
+    const exec = fakeExecutor();
+    const recentRun: RunResult = {
+      run_id: "run_x",
+      runbook_id: "a",
+      started_at: new Date(Date.now() - 10_000).toISOString(),
+      finished_at: new Date(Date.now() - 9_000).toISOString(),
+      ok: true,
+      steps: [],
+      trigger_event: event,
+    };
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [fakeFilePoller([event])],
+      cronSchedulers: [],
+      executor: exec,
+      state: fakeState([recentRun]),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("applies cooldown_sec to aws_cloudwatch_logs events as well", async () => {
+    const rb: Runbook = { ...cwRb("a", "us-east-1", "/g"), cooldown_sec: 300 };
+    const event: TriggerEvent = {
+      type: "aws_cloudwatch_logs",
+      region: "us-east-1",
+      log_group: "/g",
+      log_stream: "s",
+      message: "ERROR boom",
+      event_id: "e1",
+      timestamp: "t",
+      timestamp_ms: 0,
+    };
+    const exec = fakeExecutor();
+    const recentRun: RunResult = {
+      run_id: "run_x",
+      runbook_id: "a",
+      started_at: new Date(Date.now() - 10_000).toISOString(),
+      finished_at: new Date(Date.now() - 9_000).toISOString(),
+      ok: true,
+      steps: [],
+      trigger_event: event,
+    };
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      awsCloudWatchLogsPollers: [fakeAwsCloudWatchLogsPoller([event])],
+      executor: exec,
+      state: fakeState([recentRun]),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
+  });
+
+  it("applies cooldown_sec to datadog_monitor events as well", async () => {
+    const rb = ddRb("a", "datadoghq.com", ["env:prod"], ["alert"], { cooldown_sec: 300 });
+    const event = ddEvent("datadoghq.com", ["env:prod"], "ok", "alert");
+    const exec = fakeExecutor();
+    const recentRun: RunResult = {
+      run_id: "run_x",
+      runbook_id: "a",
+      started_at: new Date(Date.now() - 10_000).toISOString(),
+      finished_at: new Date(Date.now() - 9_000).toISOString(),
+      ok: true,
+      steps: [],
+      trigger_event: event,
+    };
+    const r = await tick({
+      runbooks: [rb],
+      pollers: [],
+      cronSchedulers: [],
+      datadogMonitorsPollers: [fakeDatadogMonitorsPoller([event])],
+      executor: exec,
+      state: fakeState([recentRun]),
+    });
+    expect(r.fired).toBe(0);
+    expect(exec.calls).toHaveLength(0);
   });
 });

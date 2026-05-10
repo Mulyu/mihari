@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { buildEnv, runBashStep } from "../src/steps/bash-step.js";
 import {
-  buildEnv,
   captureStdout,
   normalizeStepEnvName,
-  runBashStep,
-  substituteTemplate,
-} from "../src/steps/bash-step.js";
+  substituteBashTemplate,
+} from "../src/steps/template.js";
 import type { BashStep, TriggerEvent } from "../src/types/index.js";
 
 const step = (over: Partial<BashStep> = {}): BashStep => ({
@@ -46,33 +45,33 @@ const cwEvent: TriggerEvent = {
   timestamp_ms: 1745625600000,
 };
 
-describe("substituteTemplate", () => {
+describe("substituteBashTemplate", () => {
   it("replaces event vars with bare braced env refs (quoting is the user's job)", () => {
-    expect(substituteTemplate("echo {{ event.line }}")).toBe("echo ${MIHARI_EVENT_LINE}");
-    expect(substituteTemplate("p={{ event.path }} t={{ event.timestamp }}")).toBe(
+    expect(substituteBashTemplate("echo {{ event.line }}")).toBe("echo ${MIHARI_EVENT_LINE}");
+    expect(substituteBashTemplate("p={{ event.path }} t={{ event.timestamp }}")).toBe(
       "p=${MIHARI_EVENT_PATH} t=${MIHARI_EVENT_TIMESTAMP}",
     );
   });
 
   it("replaces env.NAME with bare braced env ref", () => {
-    expect(substituteTemplate("region={{ env.AWS_REGION }}")).toBe("region=${AWS_REGION}");
+    expect(substituteBashTemplate("region={{ env.AWS_REGION }}")).toBe("region=${AWS_REGION}");
   });
 
   it("replaces event.log_stream with the corresponding env ref", () => {
-    expect(substituteTemplate("stream={{ event.log_stream }}")).toBe(
+    expect(substituteBashTemplate("stream={{ event.log_stream }}")).toBe(
       "stream=${MIHARI_EVENT_LOG_STREAM}",
     );
   });
 
   it("replaces steps.<id>.output with normalized env ref", () => {
-    expect(substituteTemplate("x={{ steps.list-clusters.output }}")).toBe(
+    expect(substituteBashTemplate("x={{ steps.list-clusters.output }}")).toBe(
       "x=${MIHARI_STEP_LIST_CLUSTERS}",
     );
-    expect(substituteTemplate("x={{ steps.foo.output }}")).toBe("x=${MIHARI_STEP_FOO}");
+    expect(substituteBashTemplate("x={{ steps.foo.output }}")).toBe("x=${MIHARI_STEP_FOO}");
   });
 
   it("leaves unrelated braces alone", () => {
-    expect(substituteTemplate("echo $X {{ unknown }} ${Y}")).toBe("echo $X {{ unknown }} ${Y}");
+    expect(substituteBashTemplate("echo $X {{ unknown }} ${Y}")).toBe("echo $X {{ unknown }} ${Y}");
   });
 });
 

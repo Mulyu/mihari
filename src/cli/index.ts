@@ -50,6 +50,11 @@ import {
   createGithubWorkflowRunsApiFactory,
   uniqueGithubWorkflowRunsTriggers,
 } from "../triggers/github-workflow-runs.js";
+import {
+  SentryIssuesPoller,
+  createSentryIssuesApiFactory,
+  uniqueSentryIssuesTriggers,
+} from "../triggers/sentry-issues.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -260,6 +265,7 @@ interface Ctx {
   jiraSearchPollers: JiraSearchPoller[];
   gcpCloudLoggingPollers: GcpCloudLoggingPoller[];
   githubWorkflowRunsPollers: GithubWorkflowRunsPoller[];
+  sentryIssuesPollers: SentryIssuesPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
@@ -287,6 +293,9 @@ function triggerSummary(t: Trigger): string {
     if (t.workflows !== undefined && t.workflows.length > 0)
       parts.push(`workflows=${t.workflows.join(",")}`);
     return `github_workflow_runs:${parts.join("|")}`;
+  }
+  if (t.source === "sentry_issues") {
+    return `sentry_issues:${t.organization}/${t.project}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -426,6 +435,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const sentryGroups = uniqueSentryIssuesTriggers(runbooks);
+  const sentryIssuesPollers: SentryIssuesPoller[] = [];
+  if (sentryGroups.length > 0) {
+    const factory = await createSentryIssuesApiFactory();
+    for (const g of sentryGroups) {
+      sentryIssuesPollers.push(
+        new SentryIssuesPoller(
+          { base: g.base, organization: g.organization, project: g.project },
+          g.intervalSec,
+          state,
+          factory.forBase(g.base),
+        ),
+      );
+    }
+  }
+
   return {
     runbooks,
     state,
@@ -439,6 +464,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     jiraSearchPollers,
     gcpCloudLoggingPollers,
     githubWorkflowRunsPollers,
+    sentryIssuesPollers,
   };
 }
 

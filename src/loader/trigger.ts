@@ -2,6 +2,7 @@ import { Cron } from "croner";
 import type {
   AwsCloudWatchAlarmState,
   DatadogMonitorState,
+  SentryIssueLevel,
   Trigger,
 } from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
@@ -11,6 +12,15 @@ const AWS_CLOUDWATCH_ALARM_STATES: readonly AwsCloudWatchAlarmState[] = [
   "OK",
   "ALARM",
   "INSUFFICIENT_DATA",
+];
+
+const SENTRY_ISSUE_LEVELS: readonly SentryIssueLevel[] = [
+  "fatal",
+  "error",
+  "warning",
+  "info",
+  "debug",
+  "sample",
 ];
 
 const DATADOG_MONITOR_STATES: readonly DatadogMonitorState[] = [
@@ -206,10 +216,59 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     if (workflows !== undefined) t.workflows = workflows;
     return t;
   }
+  if (source === "sentry_issues") {
+    const base = mustString(raw, "base", file, "trigger.base");
+    if (!/^https?:\/\//.test(base))
+      throw new RunbookValidationError(file, "trigger.base must be a http(s) URL");
+    const organization = mustString(raw, "organization", file, "trigger.organization");
+    const project = mustString(raw, "project", file, "trigger.project");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const levels = parseSentryLevels(raw, file);
+    return {
+      source: "sentry_issues",
+      base: base.replace(/\/+$/, ""),
+      organization,
+      project,
+      levels,
+      interval_sec,
+    };
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be one of: file, cron, aws_cloudwatch_logs, aws_cloudwatch_alarms, datadog_monitors, datadog_logs, jira_search, gcp_cloud_logging, github_workflow_runs (got: ${source})`,
+    `trigger.source must be one of: file, cron, aws_cloudwatch_logs, aws_cloudwatch_alarms, datadog_monitors, datadog_logs, jira_search, gcp_cloud_logging, github_workflow_runs, sentry_issues (got: ${source})`,
   );
+}
+
+function parseSentryLevels(raw: Record<string, unknown>, file: string): SentryIssueLevel[] {
+  const v = raw["levels"];
+  if (v === undefined) return ["error", "fatal"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.levels must be a non-empty array of level literals",
+    );
+  }
+  const out: SentryIssueLevel[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !isSentryLevel(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.levels entries must be one of: ${SENTRY_ISSUE_LEVELS.join(", ")} (got: ${String(item)})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function isSentryLevel(s: string): s is SentryIssueLevel {
+  return (SENTRY_ISSUE_LEVELS as readonly string[]).includes(s);
 }
 
 // GitHub の conclusion 文字列は API 仕様そのまま小文字で扱う（success / failure / cancelled /

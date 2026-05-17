@@ -1,7 +1,7 @@
 import type { AgentContext } from "../types/index.js";
 
 const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.severity|event\.resource_type|event\.run_id|event\.workflow_name|event\.branch|event\.conclusion|event\.html_url|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.severity|event\.resource_type|event\.run_id|event\.workflow_name|event\.branch|event\.conclusion|event\.html_url|event\.issue_id|event\.title|event\.level|event\.permalink|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 export function substituteTemplate(text: string, ctx: AgentContext): string {
   return text.replace(TEMPLATE_RE, (raw, key: string) => {
@@ -32,7 +32,21 @@ export function substituteTemplate(text: string, ctx: AgentContext): string {
       return ctx.event.type === "jira_issue" ? ctx.event.summary : "";
     }
     if (key === "event.status") {
-      return ctx.event.type === "jira_issue" ? ctx.event.status : "";
+      if (ctx.event.type === "jira_issue") return ctx.event.status;
+      if (ctx.event.type === "sentry_issue") return ctx.event.status;
+      return "";
+    }
+    if (key === "event.issue_id") {
+      return ctx.event.type === "sentry_issue" ? ctx.event.issue_id : "";
+    }
+    if (key === "event.title") {
+      return ctx.event.type === "sentry_issue" ? ctx.event.title : "";
+    }
+    if (key === "event.level") {
+      return ctx.event.type === "sentry_issue" ? ctx.event.level : "";
+    }
+    if (key === "event.permalink") {
+      return ctx.event.type === "sentry_issue" ? ctx.event.permalink : "";
     }
     if (key === "event.severity") {
       return ctx.event.type === "gcp_cloud_logging" ? ctx.event.severity : "";

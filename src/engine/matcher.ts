@@ -10,6 +10,7 @@ import type {
   JiraSearchTrigger,
   Match,
   Runbook,
+  SentryIssuesTrigger,
   TriggerEvent,
 } from "../types/index.js";
 
@@ -21,6 +22,7 @@ type DatadogLogsRunbook = Runbook & { trigger: DatadogLogsTrigger };
 type JiraSearchRunbook = Runbook & { trigger: JiraSearchTrigger };
 type GcpCloudLoggingRunbook = Runbook & { trigger: GcpCloudLoggingTrigger };
 type GithubWorkflowRunsRunbook = Runbook & { trigger: GithubWorkflowRunsTrigger };
+type SentryIssuesRunbook = Runbook & { trigger: SentryIssuesTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
@@ -52,6 +54,10 @@ function isGcpCloudLoggingRunbook(rb: Runbook): rb is GcpCloudLoggingRunbook {
 
 function isGithubWorkflowRunsRunbook(rb: Runbook): rb is GithubWorkflowRunsRunbook {
   return rb.trigger.source === "github_workflow_runs";
+}
+
+function isSentryIssuesRunbook(rb: Runbook): rb is SentryIssuesRunbook {
+  return rb.trigger.source === "sentry_issues";
 }
 
 export function match(
@@ -177,6 +183,23 @@ export function matchGithubWorkflowRun(
       }
       return r.trigger.conclusions.includes(event.conclusion);
     })
+    .map((r) => ({ runbook: r, event }));
+}
+
+// (base, organization, project) で 1 つの poller が走り、levels フィルタは matcher で適用。
+export function matchSentryIssue(
+  event: Extract<TriggerEvent, { type: "sentry_issue" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isSentryIssuesRunbook)
+    .filter(
+      (r) =>
+        r.trigger.base === event.base &&
+        r.trigger.organization === event.organization &&
+        r.trigger.project === event.project &&
+        r.trigger.levels.includes(event.level),
+    )
     .map((r) => ({ runbook: r, event }));
 }
 

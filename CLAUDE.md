@@ -15,6 +15,7 @@
 - `jira_search` トリガー: Jira の JQL 検索結果を `interval_sec` 間隔でポーリングし、issue 1 件ごとに発火（updated タイムスタンプで cursor 管理）
 - `gcp_cloud_logging` トリガー: GCP Cloud Logging を `interval_sec` 間隔でポーリングし、log entry 1 件ごとに発火
 - `github_workflow_runs` トリガー: GitHub Actions の workflow run を `interval_sec` 間隔でポーリングし、completed run 1 件ごとに発火
+- `sentry_issues` トリガー: Sentry の unresolved issue を `interval_sec` 間隔でポーリングし、新規 / regression issue 1 件ごとに発火
 - 実行ロジックは `agent:` ブロック単一。Claude Agent SDK で動的に Bash / Read / Edit などを使う
 - 外部 SaaS（Datadog / Jira / Slack 等）の呼び出し作法は **ランブック著者の `agent.prompt` 責務**。mihari 本体は preamble を注入しない
 - state は `~/.mihari/state/` にローカル保存
@@ -67,7 +68,8 @@ mihari/
 │   │   ├── datadog-logs.ts
 │   │   ├── jira-search.ts
 │   │   ├── gcp-cloud-logging.ts
-│   │   └── github-workflow-runs.ts
+│   │   ├── github-workflow-runs.ts
+│   │   └── sentry-issues.ts
 │   └── lib/
 │       ├── logger.ts
 │       └── idempotency.ts      # event → 決定的 12 hex キー
@@ -111,6 +113,7 @@ Executor.execute(runbook, event):
 ├── jira-search/<sha1(base|jql)>.json                        # cursor
 ├── gcp-cloud-logging/<sha1(project_id|filter)>.json         # cursor
 ├── github-workflow-runs/<sha1(repo)>.json                   # last run id
+├── sentry-issues/<sha1(base|org|project)>.json              # per-issue last_seen map
 └── runs/<YYYY-MM-DD>/<run_id>.jsonl                         # 実行履歴（agent 単一の RunResult）
 ```
 

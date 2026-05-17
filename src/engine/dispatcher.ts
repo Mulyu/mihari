@@ -7,6 +7,7 @@ import {
   matchGcpCloudLogging,
   matchGithubWorkflowRun,
   matchJiraIssue,
+  matchSentryIssue,
 } from "./matcher.js";
 import type { Executor } from "./executor.js";
 import type { CronScheduler } from "../triggers/cron.js";
@@ -18,6 +19,7 @@ import type { DatadogLogsPoller } from "../triggers/datadog-logs.js";
 import type { JiraSearchPoller } from "../triggers/jira-search.js";
 import type { GcpCloudLoggingPoller } from "../triggers/gcp-cloud-logging.js";
 import type { GithubWorkflowRunsPoller } from "../triggers/github-workflow-runs.js";
+import type { SentryIssuesPoller } from "../triggers/sentry-issues.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
 
@@ -33,6 +35,7 @@ export interface DispatcherInput {
   jiraSearchPollers?: JiraSearchPoller[];
   gcpCloudLoggingPollers?: GcpCloudLoggingPoller[];
   githubWorkflowRunsPollers?: GithubWorkflowRunsPoller[];
+  sentryIssuesPollers?: SentryIssuesPoller[];
   executor: Executor;
   state: StateStore;
 }
@@ -203,6 +206,26 @@ export async function tick(
         if (opts.dryRun) {
           opts.onDryRun?.(
             `${m.runbook.id} <- github_workflow_runs:${event.repo}: ${event.workflow_name}#${event.run_number} ${event.conclusion}`,
+          );
+          continue;
+        }
+        const result = await input.executor.execute(m.runbook, m.event);
+        if (!result.ok) ok = false;
+      }
+    }
+  }
+
+  for (const sentryPoller of input.sentryIssuesPollers ?? []) {
+    const events = await sentryPoller.tick(new Date(), opts.dryRun ?? false);
+    for (const event of events) {
+      const matches = matchSentryIssue(event, input.runbooks);
+      for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
+        fired++;
+        if (opts.dryRun) {
+          opts.onDryRun?.(
+            `${m.runbook.id} <- sentry_issues:${event.organization}/${event.project}: ${event.short_id} (${event.level}) ${event.title}`,
           );
           continue;
         }

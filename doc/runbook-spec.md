@@ -188,6 +188,32 @@ Authentication uses env `GH_TOKEN` (Bearer). No SDK — Node's global `fetch` is
 
 The cursor is the monotonic run id. The first observation seeds the cursor with the top run id (no history backfill). Each tick reads page 1 in DESC order and stops paginating the moment it sees a run with `id <= cursor`.
 
+### `sentry_issues`
+
+```yaml
+trigger:
+  source: sentry_issues
+  base: https://sentry.io                # SaaS or self-hosted
+  organization: my-org
+  project: my-project
+  levels:                                # optional. "To" levels that fire. Default ["error", "fatal"]
+    - error
+    - fatal
+  interval_sec: 60
+```
+
+| Field | Purpose |
+|---|---|
+| `base` | Sentry base URL |
+| `organization` | Sentry org slug |
+| `project` | Sentry project slug |
+| `levels` | Optional. `fatal` / `error` / `warning` / `info` / `debug` / `sample` (Sentry literals, kept as-is). Default `["error", "fatal"]` |
+| `interval_sec` | Polling interval in seconds |
+
+Authentication is env `SENTRY_AUTH_TOKEN` (Bearer). No SDK — Node's global `fetch` is used. Multiple runbooks subscribing to the same `(base, organization, project)` share one poller; the `levels` filter is applied per runbook in the matcher.
+
+The cursor is a `{issue_id -> last_seen_ms}` map. `is:unresolved` issues are read over a 24h window; new issues fire with `is_new=true`, while known issues fire when their `last_seen` advances. The same prev-state-∪-newly-observed merge as `datadog_monitors` keeps known issues from being dropped on a partial fetch.
+
 ## Agent
 
 ```yaml
@@ -246,7 +272,9 @@ Per-trigger template variables (those whose value depends on the trigger source)
 - `{{ event.host }}` — datadog_log only
 - `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm only
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor only
-- `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue only
+- `{{ event.issue_key }}` / `{{ event.summary }}` — jira_issue only
+- `{{ event.status }}` — jira_issue / sentry_issue
+- `{{ event.issue_id }}` / `{{ event.title }}` / `{{ event.level }}` / `{{ event.permalink }}` — sentry_issue only
 - `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging only
 - `{{ event.run_id }}` / `{{ event.workflow_name }}` / `{{ event.branch }}` / `{{ event.conclusion }}` / `{{ event.html_url }}` — github_workflow_run only
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
@@ -278,3 +306,4 @@ See `runbooks/examples/`:
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack notification
 - `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack notification
 - `github-ci-fix.yaml` — GitHub Actions CI failure → agent opens a fix PR
+- `sentry-jira.yaml` — Sentry new-or-regressed issue → Jira ticket

@@ -7,7 +7,8 @@ export type Trigger =
   | DatadogLogsTrigger
   | JiraSearchTrigger
   | GcpCloudLoggingTrigger
-  | GithubWorkflowRunsTrigger;
+  | GithubWorkflowRunsTrigger
+  | SentryIssuesTrigger;
 
 export interface Runbook {
   id: string;
@@ -92,6 +93,23 @@ export interface GithubWorkflowRunsTrigger {
   branch?: string;
   workflows?: string[];
   conclusions: string[];
+  interval_sec: number;
+}
+
+export type SentryIssueLevel =
+  | "fatal"
+  | "error"
+  | "warning"
+  | "info"
+  | "debug"
+  | "sample";
+
+export interface SentryIssuesTrigger {
+  source: "sentry_issues";
+  base: string;
+  organization: string;
+  project: string;
+  levels: SentryIssueLevel[];
   interval_sec: number;
 }
 
@@ -187,6 +205,22 @@ export type TriggerEvent =
       status: string;
       html_url: string;
       timestamp: string;
+    }
+  | {
+      type: "sentry_issue";
+      base: string;
+      organization: string;
+      project: string;
+      issue_id: string;
+      short_id: string;
+      title: string;
+      level: SentryIssueLevel;
+      status: string;
+      permalink: string;
+      first_seen: string;
+      last_seen: string;
+      is_new: boolean;
+      timestamp: string;
     };
 
 export interface AgentContext {
@@ -261,6 +295,14 @@ export interface GcpCloudLoggingPollerState {
 export interface GithubWorkflowRunsPollerState {
   repo: string;
   last_run_id: number;
+  last_polled_at: string;
+}
+
+export interface SentryIssuesPollerState {
+  base: string;
+  organization: string;
+  project: string;
+  issue_last_seen_ms: Record<string, number>;
   last_polled_at: string;
 }
 

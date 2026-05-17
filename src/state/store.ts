@@ -23,6 +23,7 @@ import type {
   JiraSearchPollerState,
   PollerState,
   RunResult,
+  SentryIssuesPollerState,
   TriggerState,
 } from "../types/index.js";
 
@@ -46,6 +47,7 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "jira-search"), { recursive: true });
     mkdirSync(join(this.baseDir, "gcp-cloud-logging"), { recursive: true });
     mkdirSync(join(this.baseDir, "github-workflow-runs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "sentry-issues"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -412,6 +414,56 @@ export class StateStore {
     }
   }
 
+  sentryIssuesStateFile(key: {
+    base: string;
+    organization: string;
+    project: string;
+  }): string {
+    const hash = createHash("sha1")
+      .update(`${key.base}|${key.organization}|${key.project}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "sentry-issues", `${hash}.json`);
+  }
+
+  loadSentryIssuesState(key: {
+    base: string;
+    organization: string;
+    project: string;
+  }): SentryIssuesPollerState | null {
+    const file = this.sentryIssuesStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateSentryIssuesState(obj)) {
+        log.warn({ file }, "sentry-issues state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "sentry-issues state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveSentryIssuesState(state: SentryIssuesPollerState): Promise<void> {
+    const file = this.sentryIssuesStateFile({
+      base: state.base,
+      organization: state.organization,
+      project: state.project,
+    });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "sentry-issues state write failed");
+    }
+  }
+
   async appendRunResult(result: RunResult): Promise<void> {
     const date = result.started_at.slice(0, 10);
     const dir = join(this.baseDir, "runs", date);
@@ -568,6 +620,25 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   const ids = o["last_event_ids"];
   if (!Array.isArray(ids)) return false;
   return ids.every((x) => typeof x === "string");
+}
+
+function validateSentryIssuesState(v: unknown): v is SentryIssuesPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o["base"] !== "string" ||
+    typeof o["organization"] !== "string" ||
+    typeof o["project"] !== "string" ||
+    typeof o["last_polled_at"] !== "string"
+  ) {
+    return false;
+  }
+  const ls = o["issue_last_seen_ms"];
+  if (typeof ls !== "object" || ls === null || Array.isArray(ls)) return false;
+  for (const value of Object.values(ls as Record<string, unknown>)) {
+    if (typeof value !== "number") return false;
+  }
+  return true;
 }
 
 function validateGithubWorkflowRunsState(v: unknown): v is GithubWorkflowRunsPollerState {

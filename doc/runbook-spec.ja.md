@@ -188,6 +188,32 @@ trigger:
 
 カーソルは run id（monotonic）。初回 seed では top の run id を保存して過去履歴を遡らない。tick 中は page 1 から DESC 順に取得し、cursor 以下の run id を 1 件見つけたらページングを打ち切る。
 
+### `sentry_issues`
+
+```yaml
+trigger:
+  source: sentry_issues
+  base: https://sentry.io               # SaaS / self-hosted どちらも可
+  organization: my-org
+  project: my-project
+  levels:                                # 任意。発火対象の level。既定 ["error", "fatal"]
+    - error
+    - fatal
+  interval_sec: 60
+```
+
+| フィールド | 役割 |
+|---|---|
+| `base` | Sentry のベース URL |
+| `organization` | Sentry org slug |
+| `project` | Sentry project slug |
+| `levels` | 任意。`fatal` / `error` / `warning` / `info` / `debug` / `sample`（Sentry のリテラルそのまま）。既定 `["error", "fatal"]` |
+| `interval_sec` | ポーリング間隔（秒） |
+
+認証は env `SENTRY_AUTH_TOKEN` (Bearer)。SDK は使わず Node 標準の global fetch。同じ `(base, organization, project)` を購読する複数ランブックは 1 つのポーラーを共有し、`levels` フィルタは matcher 側で個別適用される。
+
+カーソルは `{issue_id -> last_seen_ms}` map。`is:unresolved` の issue を 24h 窓で観測し、未知 issue は `is_new=true` で fire、既知 issue は `last_seen` が進んだら fire する。datadog_monitors と同じ「前回 state ∪ 今回観測分」merge 方式。
+
 
 ```yaml
 agent:
@@ -245,7 +271,9 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 - `{{ event.host }}` — datadog_log のみ
 - `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm のみ
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor のみ
-- `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue のみ
+- `{{ event.issue_key }}` / `{{ event.summary }}` — jira_issue のみ
+- `{{ event.status }}` — jira_issue / sentry_issue
+- `{{ event.issue_id }}` / `{{ event.title }}` / `{{ event.level }}` / `{{ event.permalink }}` — sentry_issue のみ
 - `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging のみ
 - `{{ event.run_id }}` / `{{ event.workflow_name }}` / `{{ event.branch }}` / `{{ event.conclusion }}` / `{{ event.html_url }}` — github_workflow_run のみ
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
@@ -277,3 +305,4 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack 通知
 - `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack 通知
 - `github-ci-fix.yaml` — GitHub Actions CI 失敗 → 修正 PR を agent が作成
+- `sentry-jira.yaml` — Sentry issue 新規 or regression → Jira 起票

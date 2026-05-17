@@ -64,7 +64,7 @@ mihari run dd-monitor-jira
 mihari list
 ```
 
-トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` / `aws_cloudwatch_alarms:<region>|<カンマ区切り alarm_names>` / `datadog_monitors:<site>|<カンマ区切り monitor_tags>` / `datadog_logs:<site>|<query>` / `jira_search:<base>|<jql>` / `gcp_cloud_logging:<project_id>|<filter>` / `github_workflow_runs:<owner/repo>[|branch=…][|workflows=…]` のいずれか。
+トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` / `aws_cloudwatch_alarms:<region>|<カンマ区切り alarm_names>` / `datadog_monitors:<site>|<カンマ区切り monitor_tags>` / `datadog_logs:<site>|<query>` / `jira_search:<base>|<jql>` / `gcp_cloud_logging:<project_id>|<filter>` / `github_workflow_runs:<owner/repo>[|branch=…][|workflows=…]` / `sentry_issues:<organization>/<project>` のいずれか。
 
 ## `mihari status`
 

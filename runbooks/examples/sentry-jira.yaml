@@ -1,0 +1,45 @@
+id: sentry-jira
+description: Sentry issue 新規 or regression を agent が Jira に起票
+
+trigger:
+  source: sentry_issues
+  base: https://sentry.io
+  organization: my-org
+  project: my-project
+  levels:
+    - error
+    - fatal
+  interval_sec: 120
+
+cooldown_sec: 600
+
+agent:
+  prompt: |
+    Sentry の issue を観測:
+
+      id:       {{ event.issue_id }}
+      title:    {{ event.title }}
+      level:    {{ event.level }}
+      status:   {{ event.status }}
+      url:      {{ event.permalink }}
+
+    Jira (https://example.atlassian.net) に起票せよ:
+      - 認証: -u $JIRA_USER:$JIRA_TOKEN
+      - 起票前に "summary ~ \"$MIHARI_IDEMPOTENCY_KEY\"" の JQL で重複検出
+      - issue summary に [$MIHARI_IDEMPOTENCY_KEY] を含める
+
+    Endpoint:
+      POST https://example.atlassian.net/rest/api/3/issue
+        body: {
+          "fields": {
+            "project": { "key": "OPS" },
+            "summary": "[Sentry {{ event.level }}] {{ event.title }} [$MIHARI_IDEMPOTENCY_KEY]",
+            "issuetype": { "name": "Bug" }
+          }
+        }
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 5
+  timeout_sec: 120

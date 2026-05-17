@@ -5,6 +5,7 @@ import {
   matchDatadogLog,
   matchDatadogMonitor,
   matchGcpCloudLogging,
+  matchGithubWorkflowRun,
   matchJiraIssue,
 } from "./matcher.js";
 import type { Executor } from "./executor.js";
@@ -16,6 +17,7 @@ import type { DatadogMonitorsPoller } from "../triggers/datadog-monitors.js";
 import type { DatadogLogsPoller } from "../triggers/datadog-logs.js";
 import type { JiraSearchPoller } from "../triggers/jira-search.js";
 import type { GcpCloudLoggingPoller } from "../triggers/gcp-cloud-logging.js";
+import type { GithubWorkflowRunsPoller } from "../triggers/github-workflow-runs.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
 
@@ -30,6 +32,7 @@ export interface DispatcherInput {
   datadogLogsPollers?: DatadogLogsPoller[];
   jiraSearchPollers?: JiraSearchPoller[];
   gcpCloudLoggingPollers?: GcpCloudLoggingPoller[];
+  githubWorkflowRunsPollers?: GithubWorkflowRunsPoller[];
   executor: Executor;
   state: StateStore;
 }
@@ -180,6 +183,26 @@ export async function tick(
         if (opts.dryRun) {
           opts.onDryRun?.(
             `${m.runbook.id} <- gcp_cloud_logging:${event.project_id}|${event.filter}: ${event.message}`,
+          );
+          continue;
+        }
+        const result = await input.executor.execute(m.runbook, m.event);
+        if (!result.ok) ok = false;
+      }
+    }
+  }
+
+  for (const ghPoller of input.githubWorkflowRunsPollers ?? []) {
+    const events = await ghPoller.tick(new Date(), opts.dryRun ?? false);
+    for (const event of events) {
+      const matches = matchGithubWorkflowRun(event, input.runbooks);
+      for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
+        fired++;
+        if (opts.dryRun) {
+          opts.onDryRun?.(
+            `${m.runbook.id} <- github_workflow_runs:${event.repo}: ${event.workflow_name}#${event.run_number} ${event.conclusion}`,
           );
           continue;
         }

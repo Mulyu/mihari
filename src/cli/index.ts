@@ -45,6 +45,11 @@ import {
   createGcpCloudLoggingApiFactory,
   uniqueGcpCloudLoggingTriggers,
 } from "../triggers/gcp-cloud-logging.js";
+import {
+  GithubWorkflowRunsPoller,
+  createGithubWorkflowRunsApiFactory,
+  uniqueGithubWorkflowRunsTriggers,
+} from "../triggers/github-workflow-runs.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -254,6 +259,7 @@ interface Ctx {
   datadogLogsPollers: DatadogLogsPoller[];
   jiraSearchPollers: JiraSearchPoller[];
   gcpCloudLoggingPollers: GcpCloudLoggingPoller[];
+  githubWorkflowRunsPollers: GithubWorkflowRunsPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
@@ -274,6 +280,13 @@ function triggerSummary(t: Trigger): string {
   }
   if (t.source === "gcp_cloud_logging") {
     return `gcp_cloud_logging:${t.project_id}|${t.filter}`;
+  }
+  if (t.source === "github_workflow_runs") {
+    const parts = [t.repo];
+    if (t.branch !== undefined) parts.push(`branch=${t.branch}`);
+    if (t.workflows !== undefined && t.workflows.length > 0)
+      parts.push(`workflows=${t.workflows.join(",")}`);
+    return `github_workflow_runs:${parts.join("|")}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -397,6 +410,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const ghGroups = uniqueGithubWorkflowRunsTriggers(runbooks);
+  const githubWorkflowRunsPollers: GithubWorkflowRunsPoller[] = [];
+  if (ghGroups.length > 0) {
+    const factory = await createGithubWorkflowRunsApiFactory();
+    for (const g of ghGroups) {
+      githubWorkflowRunsPollers.push(
+        new GithubWorkflowRunsPoller(
+          { repo: g.repo },
+          g.intervalSec,
+          state,
+          factory.forRepo(g.repo),
+        ),
+      );
+    }
+  }
+
   return {
     runbooks,
     state,
@@ -409,6 +438,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     datadogLogsPollers,
     jiraSearchPollers,
     gcpCloudLoggingPollers,
+    githubWorkflowRunsPollers,
   };
 }
 

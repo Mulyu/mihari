@@ -1,7 +1,7 @@
 import type { AgentContext } from "../types/index.js";
 
 const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.severity|event\.resource_type|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.severity|event\.resource_type|event\.run_id|event\.workflow_name|event\.branch|event\.conclusion|event\.html_url|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 export function substituteTemplate(text: string, ctx: AgentContext): string {
   return text.replace(TEMPLATE_RE, (raw, key: string) => {
@@ -39,6 +39,21 @@ export function substituteTemplate(text: string, ctx: AgentContext): string {
     }
     if (key === "event.resource_type") {
       return ctx.event.type === "gcp_cloud_logging" ? ctx.event.resource_type : "";
+    }
+    if (key === "event.run_id") {
+      return ctx.event.type === "github_workflow_run" ? String(ctx.event.run_id) : "";
+    }
+    if (key === "event.workflow_name") {
+      return ctx.event.type === "github_workflow_run" ? ctx.event.workflow_name : "";
+    }
+    if (key === "event.branch") {
+      return ctx.event.type === "github_workflow_run" ? ctx.event.branch : "";
+    }
+    if (key === "event.conclusion") {
+      return ctx.event.type === "github_workflow_run" ? ctx.event.conclusion : "";
+    }
+    if (key === "event.html_url") {
+      return ctx.event.type === "github_workflow_run" ? ctx.event.html_url : "";
     }
     if (key === "event.timestamp") return ctx.event.timestamp;
     if (key === "event.log_stream") {

@@ -182,10 +182,70 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
       interval_sec,
     };
   }
+  if (source === "github_workflow_runs") {
+    const repo = mustString(raw, "repo", file, "trigger.repo");
+    if (!/^[^/\s]+\/[^/\s]+$/.test(repo))
+      throw new RunbookValidationError(file, 'trigger.repo must be "owner/repo"');
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const branch = optionalString(raw, "branch", file, "trigger.branch");
+    const workflows = parseStringArray(raw, "workflows", file, "trigger.workflows");
+    const conclusions = parseGithubConclusions(raw, file);
+    const t: Trigger = {
+      source: "github_workflow_runs",
+      repo,
+      conclusions,
+      interval_sec,
+    };
+    if (branch !== undefined) t.branch = branch;
+    if (workflows !== undefined) t.workflows = workflows;
+    return t;
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be one of: file, cron, aws_cloudwatch_logs, aws_cloudwatch_alarms, datadog_monitors, datadog_logs, jira_search, gcp_cloud_logging (got: ${source})`,
+    `trigger.source must be one of: file, cron, aws_cloudwatch_logs, aws_cloudwatch_alarms, datadog_monitors, datadog_logs, jira_search, gcp_cloud_logging, github_workflow_runs (got: ${source})`,
   );
+}
+
+// GitHub の conclusion 文字列は API 仕様そのまま小文字で扱う（success / failure / cancelled /
+// skipped / timed_out / action_required / neutral / startup_failure / stale）。
+const GITHUB_CONCLUSIONS: readonly string[] = [
+  "success",
+  "failure",
+  "cancelled",
+  "skipped",
+  "timed_out",
+  "action_required",
+  "neutral",
+  "startup_failure",
+  "stale",
+];
+
+function parseGithubConclusions(raw: Record<string, unknown>, file: string): string[] {
+  const v = raw["conclusions"];
+  if (v === undefined) return ["failure"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.conclusions must be a non-empty array of conclusion literals",
+    );
+  }
+  const out: string[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !GITHUB_CONCLUSIONS.includes(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.conclusions entries must be one of: ${GITHUB_CONCLUSIONS.join(", ")} (got: ${String(item)})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
 }
 
 function parseAwsCloudWatchAlarmTransitions(

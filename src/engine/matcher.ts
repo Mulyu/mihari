@@ -6,6 +6,7 @@ import type {
   DatadogMonitorsTrigger,
   FileTrigger,
   GcpCloudLoggingTrigger,
+  GithubWorkflowRunsTrigger,
   JiraSearchTrigger,
   Match,
   Runbook,
@@ -19,6 +20,7 @@ type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };
 type DatadogLogsRunbook = Runbook & { trigger: DatadogLogsTrigger };
 type JiraSearchRunbook = Runbook & { trigger: JiraSearchTrigger };
 type GcpCloudLoggingRunbook = Runbook & { trigger: GcpCloudLoggingTrigger };
+type GithubWorkflowRunsRunbook = Runbook & { trigger: GithubWorkflowRunsTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
@@ -46,6 +48,10 @@ function isJiraSearchRunbook(rb: Runbook): rb is JiraSearchRunbook {
 
 function isGcpCloudLoggingRunbook(rb: Runbook): rb is GcpCloudLoggingRunbook {
   return rb.trigger.source === "gcp_cloud_logging";
+}
+
+function isGithubWorkflowRunsRunbook(rb: Runbook): rb is GithubWorkflowRunsRunbook {
+  return rb.trigger.source === "github_workflow_runs";
 }
 
 export function match(
@@ -145,6 +151,32 @@ export function matchGcpCloudLogging(
     .filter(
       (r) => r.trigger.project_id === event.project_id && r.trigger.filter === event.filter,
     )
+    .map((r) => ({ runbook: r, event }));
+}
+
+// repo 単位で 1 つの poller が走り、branch / workflows / conclusions のフィルタは
+// matcher 側で各 runbook ごとに適用する。
+export function matchGithubWorkflowRun(
+  event: Extract<TriggerEvent, { type: "github_workflow_run" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isGithubWorkflowRunsRunbook)
+    .filter((r) => {
+      if (r.trigger.repo !== event.repo) return false;
+      if (r.trigger.branch !== undefined && r.trigger.branch !== event.branch) return false;
+      if (r.trigger.workflows !== undefined && r.trigger.workflows.length > 0) {
+        const slug = event.workflow_path.replace(/^\.github\/workflows\//, "");
+        if (
+          !r.trigger.workflows.includes(event.workflow_path) &&
+          !r.trigger.workflows.includes(slug) &&
+          !r.trigger.workflows.includes(event.workflow_name)
+        ) {
+          return false;
+        }
+      }
+      return r.trigger.conclusions.includes(event.conclusion);
+    })
     .map((r) => ({ runbook: r, event }));
 }
 

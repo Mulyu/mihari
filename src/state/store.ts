@@ -19,6 +19,7 @@ import type {
   DatadogMonitorState,
   DatadogMonitorsPollerState,
   GcpCloudLoggingPollerState,
+  GithubWorkflowRunsPollerState,
   JiraSearchPollerState,
   PollerState,
   RunResult,
@@ -44,6 +45,7 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "datadog-logs"), { recursive: true });
     mkdirSync(join(this.baseDir, "jira-search"), { recursive: true });
     mkdirSync(join(this.baseDir, "gcp-cloud-logging"), { recursive: true });
+    mkdirSync(join(this.baseDir, "github-workflow-runs"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -372,6 +374,44 @@ export class StateStore {
     }
   }
 
+  githubWorkflowRunsStateFile(key: { repo: string }): string {
+    const hash = createHash("sha1").update(key.repo).digest("hex").slice(0, 16);
+    return join(this.baseDir, "github-workflow-runs", `${hash}.json`);
+  }
+
+  loadGithubWorkflowRunsState(key: { repo: string }): GithubWorkflowRunsPollerState | null {
+    const file = this.githubWorkflowRunsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateGithubWorkflowRunsState(obj)) {
+        log.warn({ file }, "github-workflow-runs state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "github-workflow-runs state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveGithubWorkflowRunsState(state: GithubWorkflowRunsPollerState): Promise<void> {
+    const file = this.githubWorkflowRunsStateFile({ repo: state.repo });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn(
+        { file, err: (e as Error).message },
+        "github-workflow-runs state write failed",
+      );
+    }
+  }
+
   async appendRunResult(result: RunResult): Promise<void> {
     const date = result.started_at.slice(0, 10);
     const dir = join(this.baseDir, "runs", date);
@@ -528,6 +568,16 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   const ids = o["last_event_ids"];
   if (!Array.isArray(ids)) return false;
   return ids.every((x) => typeof x === "string");
+}
+
+function validateGithubWorkflowRunsState(v: unknown): v is GithubWorkflowRunsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o["repo"] === "string" &&
+    typeof o["last_run_id"] === "number" &&
+    typeof o["last_polled_at"] === "string"
+  );
 }
 
 function validateGcpCloudLoggingState(v: unknown): v is GcpCloudLoggingPollerState {

@@ -6,7 +6,8 @@ export type Trigger =
   | DatadogMonitorsTrigger
   | DatadogLogsTrigger
   | JiraSearchTrigger
-  | GcpCloudLoggingTrigger;
+  | GcpCloudLoggingTrigger
+  | GithubWorkflowRunsTrigger;
 
 export interface Runbook {
   id: string;
@@ -82,6 +83,15 @@ export interface GcpCloudLoggingTrigger {
   source: "gcp_cloud_logging";
   project_id: string;
   filter: string;
+  interval_sec: number;
+}
+
+export interface GithubWorkflowRunsTrigger {
+  source: "github_workflow_runs";
+  repo: string;
+  branch?: string;
+  workflows?: string[];
+  conclusions: string[];
   interval_sec: number;
 }
 
@@ -164,6 +174,19 @@ export type TriggerEvent =
       message: string;
       timestamp: string;
       timestamp_ms: number;
+    }
+  | {
+      type: "github_workflow_run";
+      repo: string;
+      run_id: number;
+      run_number: number;
+      workflow_name: string;
+      workflow_path: string;
+      branch: string;
+      conclusion: string;
+      status: string;
+      html_url: string;
+      timestamp: string;
     };
 
 export interface AgentContext {
@@ -232,6 +255,12 @@ export interface GcpCloudLoggingPollerState {
   filter: string;
   last_event_timestamp_ms: number;
   last_event_ids: string[];
+  last_polled_at: string;
+}
+
+export interface GithubWorkflowRunsPollerState {
+  repo: string;
+  last_run_id: number;
   last_polled_at: string;
 }
 

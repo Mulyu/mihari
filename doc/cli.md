@@ -64,7 +64,7 @@ Lists runbooks. Each row is `<id>\t<trigger>\t<description>`.
 mihari list
 ```
 
-The trigger column is rendered as `file:<path>`, `cron:<schedule>`, `aws_cloudwatch_logs:<region>|<log_group>`, `aws_cloudwatch_alarms:<region>|<comma-joined alarm_names>`, `datadog_monitors:<site>|<comma-joined monitor_tags>`, `datadog_logs:<site>|<query>`, `jira_search:<base>|<jql>`, or `gcp_cloud_logging:<project_id>|<filter>`.
+The trigger column is rendered as `file:<path>`, `cron:<schedule>`, `aws_cloudwatch_logs:<region>|<log_group>`, `aws_cloudwatch_alarms:<region>|<comma-joined alarm_names>`, `datadog_monitors:<site>|<comma-joined monitor_tags>`, `datadog_logs:<site>|<query>`, `jira_search:<base>|<jql>`, `gcp_cloud_logging:<project_id>|<filter>`, or `github_workflow_runs:<owner/repo>[|branch=…][|workflows=…]`.
 
 ## `mihari status`
 

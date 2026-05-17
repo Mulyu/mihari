@@ -161,6 +161,33 @@ trigger:
 
 カーソルは insertId とタイムスタンプの組で管理する（`aws_cloudwatch_logs` と同じ形）。ユーザ filter に加えて poller 側で `timestamp >= ...` を AND で重ねるので、フィルタ式自体に時刻条件を入れる必要はない。
 
+### `github_workflow_runs`
+
+```yaml
+trigger:
+  source: github_workflow_runs
+  repo: example/app
+  branch: main                 # 任意。matcher で filter
+  workflows:                   # 任意。"ci.yml" / ".github/workflows/ci.yml" / workflow 名のいずれか
+    - ci.yml
+  conclusions:                 # 任意。発火する conclusion。既定 ["failure"]
+    - failure
+    - cancelled
+  interval_sec: 60
+```
+
+| フィールド | 役割 |
+|---|---|
+| `repo` | `owner/repo` 形式 |
+| `branch` | 任意。filter on `head_branch` |
+| `workflows` | 任意。filter on workflow 名 / file path / slug |
+| `conclusions` | 任意。`success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` / `neutral` / `startup_failure` / `stale` のいずれか（GitHub のリテラルそのまま）。既定 `["failure"]` |
+| `interval_sec` | ポーリング間隔（秒） |
+
+認証は env `GH_TOKEN`（Bearer）。SDK は使わず Node 標準の global fetch。同じ `repo` を購読する複数ランブックは 1 つのポーラーを共有し、`branch` / `workflows` / `conclusions` のフィルタは matcher 側で個別適用される。
+
+カーソルは run id（monotonic）。初回 seed では top の run id を保存して過去履歴を遡らない。tick 中は page 1 から DESC 順に取得し、cursor 以下の run id を 1 件見つけたらページングを打ち切る。
+
 
 ```yaml
 agent:
@@ -220,6 +247,7 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor のみ
 - `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue のみ
 - `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging のみ
+- `{{ event.run_id }}` / `{{ event.workflow_name }}` / `{{ event.branch }}` / `{{ event.conclusion }}` / `{{ event.html_url }}` — github_workflow_run のみ
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
 
@@ -248,3 +276,4 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack 通知
 - `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack 通知
+- `github-ci-fix.yaml` — GitHub Actions CI 失敗 → 修正 PR を agent が作成

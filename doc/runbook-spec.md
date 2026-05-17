@@ -161,6 +161,33 @@ Authentication is delegated to the GCP SDK default chain (`GOOGLE_APPLICATION_CR
 
 The cursor combines insertId and timestamp (same shape as `aws_cloudwatch_logs`). The user-supplied filter is AND-combined with `timestamp >= ...` by the poller, so you do not need to include a time clause in your filter.
 
+### `github_workflow_runs`
+
+```yaml
+trigger:
+  source: github_workflow_runs
+  repo: example/app
+  branch: main                 # optional, matcher-side filter on head_branch
+  workflows:                   # optional. "ci.yml" / ".github/workflows/ci.yml" / workflow name
+    - ci.yml
+  conclusions:                 # optional. "to" conclusions that fire the runbook. Default ["failure"]
+    - failure
+    - cancelled
+  interval_sec: 60
+```
+
+| Field | Purpose |
+|---|---|
+| `repo` | `owner/repo` |
+| `branch` | Optional, filter on `head_branch` |
+| `workflows` | Optional. Filter by workflow name / file path / slug |
+| `conclusions` | Optional. `success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` / `neutral` / `startup_failure` / `stale` (GitHub literals, kept as-is). Default `["failure"]` |
+| `interval_sec` | Polling interval in seconds |
+
+Authentication uses env `GH_TOKEN` (Bearer). No SDK — Node's global `fetch` is used. Multiple runbooks subscribing to the same `repo` share one poller; `branch` / `workflows` / `conclusions` filters are applied per runbook in the matcher.
+
+The cursor is the monotonic run id. The first observation seeds the cursor with the top run id (no history backfill). Each tick reads page 1 in DESC order and stops paginating the moment it sees a run with `id <= cursor`.
+
 ## Agent
 
 ```yaml
@@ -221,6 +248,7 @@ Per-trigger template variables (those whose value depends on the trigger source)
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor only
 - `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue only
 - `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging only
+- `{{ event.run_id }}` / `{{ event.workflow_name }}` / `{{ event.branch }}` / `{{ event.conclusion }}` / `{{ event.html_url }}` — github_workflow_run only
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
 
@@ -249,3 +277,4 @@ See `runbooks/examples/`:
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack notification
 - `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack notification
+- `github-ci-fix.yaml` — GitHub Actions CI failure → agent opens a fix PR

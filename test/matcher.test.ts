@@ -310,6 +310,16 @@ describe("matchAwsCloudWatchAlarm", () => {
     expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
   });
 
+  it("filters out runbooks whose alarm_names set differs", () => {
+    const rbs = [
+      cwAlarmRb("a", "us-east-1", ["db-cpu"], ["ALARM"]),
+      cwAlarmRb("b", "us-east-1", ["api-5xx"], ["ALARM"]),
+      cwAlarmRb("c", "us-east-1", undefined, ["ALARM"]),
+    ];
+    const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", ["db-cpu"], "OK", "ALARM"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
   it("treats undefined and [] alarm_names as the same key", () => {
     const rbs = [cwAlarmRb("a", "us-east-1", undefined, ["ALARM"])];
     const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", [], "OK", "ALARM"), rbs);
@@ -629,6 +639,18 @@ describe("matchSentryIssue", () => {
   it("matches when base + org + project + level all align", () => {
     const rbs = [
       sentryRb("a", "https://sentry.example", "org1", "p1", ["error", "fatal"]),
+    ];
+    const m = matchSentryIssue(
+      sentryEvent("https://sentry.example", "org1", "p1", "error"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose base differs", () => {
+    const rbs = [
+      sentryRb("a", "https://sentry.example", "org1", "p1", ["error"]),
+      sentryRb("b", "https://sentry.io", "org1", "p1", ["error"]),
     ];
     const m = matchSentryIssue(
       sentryEvent("https://sentry.example", "org1", "p1", "error"),

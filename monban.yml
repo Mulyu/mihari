@@ -46,6 +46,23 @@ path:
         - "runbook-spec.md"
         - "runbook-spec.ja.md"
 
+    # トリガー追加時の対称性担保：
+    # 新しいトリガーを足したら poller テストも必ず足す（direction の 12 ステップ「テスト 2 本」のうち poller 側）。
+    - path: "src/triggers/*.ts"
+      companions:
+        - pattern: "test/{stem}-poller.test.ts"
+          required: true
+          root: true
+
+    # SaaS 系トリガー（file / cron 以外）は loader テストも必須（direction の 12 ステップ「テスト 2 本」のうち loader 側）。
+    # file / cron は loader 側のバリデーションが trigger.ts の小規模分岐に閉じるため runbook-loader.test.ts で吸収できる。
+    - path: "src/triggers/*.ts"
+      exclude: ["src/triggers/file.ts", "src/triggers/cron.ts"]
+      companions:
+        - pattern: "test/{stem}-loader.test.ts"
+          required: true
+          root: true
+
   forbidden:
     # 旧構造への先祖返りを止める（PR #21 で恒久削除）。
     - path: "src/core/**"

@@ -101,6 +101,26 @@ trigger:
 
 認証は環境変数 `DD_API_KEY` / `DD_APP_KEY` を mihari が読み、SDK にそのまま渡す。同じ `(site, monitor_tags)` を購読する複数ランブックは 1 つのポーラーを共有し、`transitions` フィルタは matcher 側で個別適用される。
 
+### `datadog_logs`
+
+```yaml
+trigger:
+  source: datadog_logs
+  site: datadoghq.com
+  query: "service:checkout status:error"   # Datadog Logs Search のクエリ文字列
+  interval_sec: 60
+```
+
+| フィールド | 役割 |
+|---|---|
+| `site` | Datadog のサイト |
+| `query` | Datadog Logs Search のクエリ文字列 |
+| `interval_sec` | ポーリング間隔（秒） |
+
+認証は `datadog_monitors` と同じく env `DD_API_KEY` / `DD_APP_KEY`。SDK は当該トリガーが存在するときのみ動的 import（`datadog_monitors` と同じパッケージを共有）。同じ `(site, query)` を購読する複数ランブックは 1 つのポーラーを共有する。
+
+カーソルは timestamp ベースで、同 timestamp に並ぶ event id を境界 dedup 用に保持する（`aws_cloudwatch_logs` と同じパターン）。1 tick で取り切れない場合は次 tick に持ち越す。
+
 ## Agent
 
 ```yaml
@@ -149,19 +169,20 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 
 `agent.prompt` / `agent.system` および対応する `_file` の中身は `{{ ... }}` で展開される。
 
-| 変数 | `file` | `cron` | `aws_cloudwatch_logs` | `aws_cloudwatch_alarms` | `datadog_monitors` |
-|------|--------|--------|---|---|---|
-| `{{ event.line }}` | マッチ行 | 空文字 | event の message | 空文字 | 空文字 |
-| `{{ event.path }}` | ログファイルパス | 空文字 | log_group 名 | 空文字 | 空文字 |
-| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO 8601) | 発火時刻 | event の timestamp | 遷移観測時刻 | 遷移観測時刻 |
-| `{{ event.log_stream }}` | 空文字 | 空文字 | log_stream 名 | 空文字 | 空文字 |
-| `{{ event.monitor_id }}` | 空文字 | 空文字 | 空文字 | 空文字 | Datadog monitor id |
-| `{{ event.monitor_name }}` | 空文字 | 空文字 | 空文字 | 空文字 | Datadog monitor 名 |
-| `{{ event.alarm_name }}` | 空文字 | 空文字 | 空文字 | CloudWatch alarm 名 | 空文字 |
-| `{{ event.alarm_arn }}` | 空文字 | 空文字 | 空文字 | CloudWatch alarm ARN | 空文字 |
-| `{{ event.from_state }}` | 空文字 | 空文字 | 空文字 | 直前の alarm state | 直前の monitor state |
-| `{{ event.to_state }}` | 空文字 | 空文字 | 空文字 | 現在の alarm state | 現在の monitor state |
-| `{{ env.<NAME> }}` | `process.env[NAME]` | 同左 | 同左 | 同左 | 同左 |
+主要なテンプレ変数（トリガー別に値が変わるもの）:
+
+- `{{ event.line }}` — file の行 / aws_cloudwatch_logs の message / datadog_log の message
+- `{{ event.path }}` — file のパス / aws_cloudwatch_logs の log_group / datadog_log の query
+- `{{ event.timestamp }}` — すべて。発火または遷移観測時刻（ISO 8601）
+- `{{ event.log_stream }}` — aws_cloudwatch_logs のみ
+- `{{ event.service }}` — datadog_log のみ
+- `{{ event.host }}` — datadog_log のみ
+- `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm のみ
+- `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor のみ
+- `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
+- `{{ env.<NAME> }}` — `process.env[NAME]`
+
+該当しないトリガーで参照したテンプレ変数は空文字に展開される。
 
 エージェントの Bash tool 子プロセスには次が env として追加される:
 
@@ -183,3 +204,4 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `cron-health-agent.yaml` — 定期 health check → 失敗時 Slack 通知
 - `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack 一次切り分け
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm 遷移 → PagerDuty trigger/resolve
+- `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger

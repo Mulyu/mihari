@@ -2,6 +2,7 @@ import {
   match,
   matchAwsCloudWatchAlarm,
   matchAwsCloudWatchLogs,
+  matchDatadogLog,
   matchDatadogMonitor,
 } from "./matcher.js";
 import type { Executor } from "./executor.js";
@@ -10,6 +11,7 @@ import type { FilePoller } from "../triggers/file.js";
 import type { AwsCloudWatchLogsPoller } from "../triggers/aws-cloudwatch-logs.js";
 import type { AwsCloudWatchAlarmsPoller } from "../triggers/aws-cloudwatch-alarms.js";
 import type { DatadogMonitorsPoller } from "../triggers/datadog-monitors.js";
+import type { DatadogLogsPoller } from "../triggers/datadog-logs.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
 
@@ -21,6 +23,7 @@ export interface DispatcherInput {
   awsCloudWatchLogsPollers?: AwsCloudWatchLogsPoller[];
   awsCloudWatchAlarmsPollers?: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers?: DatadogMonitorsPoller[];
+  datadogLogsPollers?: DatadogLogsPoller[];
   executor: Executor;
   state: StateStore;
 }
@@ -111,6 +114,26 @@ export async function tick(
         if (opts.dryRun) {
           opts.onDryRun?.(
             `${m.runbook.id} <- datadog_monitors:${event.site}|${event.monitor_tags.join(",")}: ${event.monitor_name} (${event.from_state} -> ${event.to_state})`,
+          );
+          continue;
+        }
+        const result = await input.executor.execute(m.runbook, m.event);
+        if (!result.ok) ok = false;
+      }
+    }
+  }
+
+  for (const ddLogsPoller of input.datadogLogsPollers ?? []) {
+    const events = await ddLogsPoller.tick(new Date(), opts.dryRun ?? false);
+    for (const event of events) {
+      const matches = matchDatadogLog(event, input.runbooks);
+      for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
+        fired++;
+        if (opts.dryRun) {
+          opts.onDryRun?.(
+            `${m.runbook.id} <- datadog_logs:${event.site}|${event.query}: ${event.message}`,
           );
           continue;
         }

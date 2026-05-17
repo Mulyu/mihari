@@ -124,9 +124,26 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     if (monitor_tags !== undefined) t.monitor_tags = monitor_tags;
     return t;
   }
+  if (source === "datadog_logs") {
+    const site = mustString(raw, "site", file, "trigger.site");
+    const query = mustString(raw, "query", file, "trigger.query");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    return {
+      source: "datadog_logs",
+      site,
+      query,
+      interval_sec,
+    };
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", "aws_cloudwatch_alarms", or "datadog_monitors" (got: ${source})`,
+    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", "aws_cloudwatch_alarms", "datadog_monitors", or "datadog_logs" (got: ${source})`,
   );
 }
 

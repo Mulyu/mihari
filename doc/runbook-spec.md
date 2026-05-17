@@ -101,6 +101,26 @@ trigger:
 
 Authentication: mihari reads `DD_API_KEY` and `DD_APP_KEY` from the environment and passes them straight to the SDK. If two runbooks subscribe to the same `(site, monitor_tags)` they share one poller; different `transitions` filters across those subscribers are honored independently in the matcher.
 
+### `datadog_logs`
+
+```yaml
+trigger:
+  source: datadog_logs
+  site: datadoghq.com
+  query: "service:checkout status:error"   # Datadog Logs Search query string
+  interval_sec: 60
+```
+
+| Field | Purpose |
+|---|---|
+| `site` | Datadog site |
+| `query` | Datadog Logs Search query string |
+| `interval_sec` | Polling interval in seconds |
+
+Authentication uses the same `DD_API_KEY` / `DD_APP_KEY` env vars as `datadog_monitors`. The SDK is dynamically imported only when this trigger is present (it shares the `@datadog/datadog-api-client` package). Multiple runbooks subscribing to the same `(site, query)` share one poller.
+
+The cursor is timestamp-based, with event ids at the boundary kept for dedup (same shape as `aws_cloudwatch_logs`). If a tick cannot drain all results, the rest carries to the next tick.
+
 ## Agent
 
 ```yaml
@@ -149,19 +169,20 @@ See `runbooks/examples/dd-monitor-jira.yaml` for a concrete example. `MIHARI_IDE
 
 Templates are expanded with `{{ ... }}` inside `agent.prompt` and `agent.system` (and the corresponding `_file` variants).
 
-| Variable | `file` | `cron` | `aws_cloudwatch_logs` | `aws_cloudwatch_alarms` | `datadog_monitors` |
-|------|--------|--------|---|---|---|
-| `{{ event.line }}` | The matched line | Empty string | The event message | Empty string | Empty string |
-| `{{ event.path }}` | Path to the log file | Empty string | The log group name | Empty string | Empty string |
-| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing | Event timestamp | Transition-observed time | Transition-observed time |
-| `{{ event.log_stream }}` | Empty string | Empty string | The log stream name | Empty string | Empty string |
-| `{{ event.monitor_id }}` | Empty string | Empty string | Empty string | Empty string | Datadog monitor id |
-| `{{ event.monitor_name }}` | Empty string | Empty string | Empty string | Empty string | Datadog monitor name |
-| `{{ event.alarm_name }}` | Empty string | Empty string | Empty string | CloudWatch alarm name | Empty string |
-| `{{ event.alarm_arn }}` | Empty string | Empty string | Empty string | CloudWatch alarm ARN | Empty string |
-| `{{ event.from_state }}` | Empty string | Empty string | Empty string | Previous alarm state | Previous monitor state |
-| `{{ event.to_state }}` | Empty string | Empty string | Empty string | Current alarm state | Current monitor state |
-| `{{ env.<NAME> }}` | `process.env[NAME]` | same | same | same | same |
+Per-trigger template variables (those whose value depends on the trigger source):
+
+- `{{ event.line }}` — file: the matched line / aws_cloudwatch_logs: the message / datadog_log: the message
+- `{{ event.path }}` — file: the log path / aws_cloudwatch_logs: the log_group / datadog_log: the query
+- `{{ event.timestamp }}` — all triggers. Time of firing or transition observation (ISO 8601)
+- `{{ event.log_stream }}` — aws_cloudwatch_logs only
+- `{{ event.service }}` — datadog_log only
+- `{{ event.host }}` — datadog_log only
+- `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm only
+- `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor only
+- `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
+- `{{ env.<NAME> }}` — `process.env[NAME]`
+
+A template variable referenced for a trigger that does not produce it expands to the empty string.
 
 Inside the agent's Bash tool, mihari additionally injects:
 
@@ -183,3 +204,4 @@ See `runbooks/examples/`:
 - `cron-health-agent.yaml` — Periodic health check → Slack on failure
 - `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack triage
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm transitions → PagerDuty trigger/resolve
+- `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger

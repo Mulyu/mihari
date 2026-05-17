@@ -1,0 +1,41 @@
+id: dd-logs-pagerduty
+description: Datadog Logs に流れる service:checkout の ERROR を agent が要約し PagerDuty に投げる
+
+trigger:
+  source: datadog_logs
+  site: datadoghq.com
+  query: "service:checkout status:error"
+  interval_sec: 60
+
+cooldown_sec: 60
+
+agent:
+  prompt: |
+    Datadog の query "{{ event.path }}" にマッチした log を観測:
+
+      timestamp: {{ event.timestamp }}
+      service:   {{ event.service }}
+      host:      {{ event.host }}
+      message:   {{ event.line }}
+
+    短い summary を作って PagerDuty に通知せよ。同じ event を 2 度通知しないよう
+    dedup_key には $MIHARI_IDEMPOTENCY_KEY を使う。
+
+    Endpoint:
+      POST https://events.pagerduty.com/v2/enqueue
+        body: {
+          "routing_key": "$PAGERDUTY_ROUTING_KEY",
+          "event_action": "trigger",
+          "dedup_key": "$MIHARI_IDEMPOTENCY_KEY",
+          "payload": {
+            "summary": "...",
+            "source": "{{ event.host }}",
+            "severity": "error"
+          }
+        }
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 3
+  timeout_sec: 60

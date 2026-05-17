@@ -3,7 +3,8 @@ export type Trigger =
   | CronTrigger
   | AwsCloudWatchLogsTrigger
   | AwsCloudWatchAlarmsTrigger
-  | DatadogMonitorsTrigger;
+  | DatadogMonitorsTrigger
+  | DatadogLogsTrigger;
 
 export interface Runbook {
   id: string;
@@ -61,6 +62,13 @@ export interface DatadogMonitorsTrigger {
   interval_sec: number;
 }
 
+export interface DatadogLogsTrigger {
+  source: "datadog_logs";
+  site: string;
+  query: string;
+  interval_sec: number;
+}
+
 export interface Agent {
   prompt: string;
   system?: string;
@@ -106,6 +114,17 @@ export type TriggerEvent =
       from_state: DatadogMonitorState;
       to_state: DatadogMonitorState;
       timestamp: string;
+    }
+  | {
+      type: "datadog_log";
+      site: string;
+      query: string;
+      log_id: string;
+      service: string;
+      host: string;
+      message: string;
+      timestamp: string;
+      timestamp_ms: number;
     };
 
 export interface AgentContext {
@@ -150,6 +169,14 @@ export interface DatadogMonitorsPollerState {
   site: string;
   monitor_tags: string[];
   monitor_states: Record<string, DatadogMonitorState>;
+  last_polled_at: string;
+}
+
+export interface DatadogLogsPollerState {
+  site: string;
+  query: string;
+  last_event_timestamp_ms: number;
+  last_event_ids: string[];
   last_polled_at: string;
 }
 

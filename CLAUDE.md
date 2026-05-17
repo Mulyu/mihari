@@ -11,6 +11,7 @@
 - `aws_cloudwatch_logs` トリガー: CloudWatch Logs を `interval_sec` 間隔でポーリングし、event 1 件ごとに発火
 - `aws_cloudwatch_alarms` トリガー: CloudWatch アラームを `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
 - `datadog_monitors` トリガー: Datadog Monitor を `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
+- `datadog_logs` トリガー: Datadog Logs Search を `interval_sec` 間隔でポーリングし、log entry 1 件ごとに発火
 - 実行ロジックは `agent:` ブロック単一。Claude Agent SDK で動的に Bash / Read / Edit などを使う
 - 外部 SaaS（Datadog / Jira / Slack 等）の呼び出し作法は **ランブック著者の `agent.prompt` 責務**。mihari 本体は preamble を注入しない
 - state は `~/.mihari/state/` にローカル保存
@@ -59,7 +60,8 @@ mihari/
 │   │   ├── cron.ts             # CronScheduler
 │   │   ├── aws-cloudwatch-logs.ts
 │   │   ├── aws-cloudwatch-alarms.ts
-│   │   └── datadog-monitors.ts
+│   │   ├── datadog-monitors.ts
+│   │   └── datadog-logs.ts
 │   └── lib/
 │       ├── logger.ts
 │       └── idempotency.ts      # event → 決定的 12 hex キー
@@ -99,6 +101,7 @@ Executor.execute(runbook, event):
 ├── aws-cloudwatch-logs/<sha1(region|group)>.json            # cursor
 ├── aws-cloudwatch-alarms/<sha1(region|sorted-alarm_names)>.json  # per-alarm state map
 ├── datadog-monitors/<sha1(site|sorted-monitor_tags)>.json   # per-monitor state map
+├── datadog-logs/<sha1(site|query)>.json                     # cursor
 └── runs/<YYYY-MM-DD>/<run_id>.jsonl                         # 実行履歴（agent 単一の RunResult）
 ```
 

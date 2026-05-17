@@ -15,6 +15,7 @@ import type {
   AwsCloudWatchAlarmState,
   AwsCloudWatchAlarmsPollerState,
   AwsCloudWatchLogsPollerState,
+  DatadogLogsPollerState,
   DatadogMonitorState,
   DatadogMonitorsPollerState,
   PollerState,
@@ -38,6 +39,7 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "aws-cloudwatch-logs"), { recursive: true });
     mkdirSync(join(this.baseDir, "aws-cloudwatch-alarms"), { recursive: true });
     mkdirSync(join(this.baseDir, "datadog-monitors"), { recursive: true });
+    mkdirSync(join(this.baseDir, "datadog-logs"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -249,6 +251,44 @@ export class StateStore {
     }
   }
 
+  datadogLogsStateFile(key: { site: string; query: string }): string {
+    const hash = createHash("sha1")
+      .update(`${key.site}|${key.query}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "datadog-logs", `${hash}.json`);
+  }
+
+  loadDatadogLogsState(key: {
+    site: string;
+    query: string;
+  }): DatadogLogsPollerState | null {
+    const file = this.datadogLogsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateDatadogLogsState(obj)) {
+        log.warn({ file }, "datadog-logs state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn({ file, err: err.message }, "datadog-logs state read failed, treating as empty");
+      return null;
+    }
+  }
+
+  async saveDatadogLogsState(state: DatadogLogsPollerState): Promise<void> {
+    const file = this.datadogLogsStateFile({ site: state.site, query: state.query });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "datadog-logs state write failed");
+    }
+  }
+
   async appendRunResult(result: RunResult): Promise<void> {
     const date = result.started_at.slice(0, 10);
     const dir = join(this.baseDir, "runs", date);
@@ -397,6 +437,22 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   if (
     typeof o["region"] !== "string" ||
     typeof o["log_group"] !== "string" ||
+    typeof o["last_event_timestamp_ms"] !== "number" ||
+    typeof o["last_polled_at"] !== "string"
+  ) {
+    return false;
+  }
+  const ids = o["last_event_ids"];
+  if (!Array.isArray(ids)) return false;
+  return ids.every((x) => typeof x === "string");
+}
+
+function validateDatadogLogsState(v: unknown): v is DatadogLogsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o["site"] !== "string" ||
+    typeof o["query"] !== "string" ||
     typeof o["last_event_timestamp_ms"] !== "number" ||
     typeof o["last_polled_at"] !== "string"
   ) {

@@ -30,6 +30,11 @@ import {
   createDatadogMonitorsApiFactory,
   uniqueDatadogMonitorsTriggers,
 } from "../triggers/datadog-monitors.js";
+import {
+  DatadogLogsPoller,
+  createDatadogLogsApiFactory,
+  uniqueDatadogLogsTriggers,
+} from "../triggers/datadog-logs.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -236,6 +241,7 @@ interface Ctx {
   awsCloudWatchLogsPollers: AwsCloudWatchLogsPoller[];
   awsCloudWatchAlarmsPollers: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers: DatadogMonitorsPoller[];
+  datadogLogsPollers: DatadogLogsPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
@@ -247,6 +253,9 @@ function triggerSummary(t: Trigger): string {
   if (t.source === "aws_cloudwatch_alarms") {
     const names = (t.alarm_names ?? []).join(",");
     return `aws_cloudwatch_alarms:${t.region}|${names}`;
+  }
+  if (t.source === "datadog_logs") {
+    return `datadog_logs:${t.site}|${t.query}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -322,6 +331,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const ddLogsGroups = uniqueDatadogLogsTriggers(runbooks);
+  const datadogLogsPollers: DatadogLogsPoller[] = [];
+  if (ddLogsGroups.length > 0) {
+    const factory = await createDatadogLogsApiFactory();
+    for (const g of ddLogsGroups) {
+      datadogLogsPollers.push(
+        new DatadogLogsPoller(
+          { site: g.site, query: g.query },
+          g.intervalSec,
+          state,
+          factory.forSite(g.site),
+        ),
+      );
+    }
+  }
+
   return {
     runbooks,
     state,
@@ -331,6 +356,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     awsCloudWatchLogsPollers,
     awsCloudWatchAlarmsPollers,
     datadogMonitorsPollers,
+    datadogLogsPollers,
   };
 }
 

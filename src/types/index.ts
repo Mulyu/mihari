@@ -5,7 +5,8 @@ export type Trigger =
   | AwsCloudWatchAlarmsTrigger
   | DatadogMonitorsTrigger
   | DatadogLogsTrigger
-  | JiraSearchTrigger;
+  | JiraSearchTrigger
+  | GcpCloudLoggingTrigger;
 
 export interface Runbook {
   id: string;
@@ -77,6 +78,13 @@ export interface JiraSearchTrigger {
   interval_sec: number;
 }
 
+export interface GcpCloudLoggingTrigger {
+  source: "gcp_cloud_logging";
+  project_id: string;
+  filter: string;
+  interval_sec: number;
+}
+
 export interface Agent {
   prompt: string;
   system?: string;
@@ -144,6 +152,18 @@ export type TriggerEvent =
       updated: string;
       updated_ms: number;
       timestamp: string;
+    }
+  | {
+      type: "gcp_cloud_logging";
+      project_id: string;
+      filter: string;
+      log_id: string;
+      log_name: string;
+      severity: string;
+      resource_type: string;
+      message: string;
+      timestamp: string;
+      timestamp_ms: number;
     };
 
 export interface AgentContext {
@@ -204,6 +224,14 @@ export interface JiraSearchPollerState {
   jql: string;
   last_updated_ms: number;
   last_issue_keys: string[];
+  last_polled_at: string;
+}
+
+export interface GcpCloudLoggingPollerState {
+  project_id: string;
+  filter: string;
+  last_event_timestamp_ms: number;
+  last_event_ids: string[];
   last_polled_at: string;
 }
 

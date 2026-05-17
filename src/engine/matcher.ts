@@ -5,6 +5,7 @@ import type {
   DatadogLogsTrigger,
   DatadogMonitorsTrigger,
   FileTrigger,
+  GcpCloudLoggingTrigger,
   JiraSearchTrigger,
   Match,
   Runbook,
@@ -17,6 +18,7 @@ type AwsCloudWatchAlarmsRunbook = Runbook & { trigger: AwsCloudWatchAlarmsTrigge
 type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };
 type DatadogLogsRunbook = Runbook & { trigger: DatadogLogsTrigger };
 type JiraSearchRunbook = Runbook & { trigger: JiraSearchTrigger };
+type GcpCloudLoggingRunbook = Runbook & { trigger: GcpCloudLoggingTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
@@ -40,6 +42,10 @@ function isDatadogLogsRunbook(rb: Runbook): rb is DatadogLogsRunbook {
 
 function isJiraSearchRunbook(rb: Runbook): rb is JiraSearchRunbook {
   return rb.trigger.source === "jira_search";
+}
+
+function isGcpCloudLoggingRunbook(rb: Runbook): rb is GcpCloudLoggingRunbook {
+  return rb.trigger.source === "gcp_cloud_logging";
 }
 
 export function match(
@@ -127,6 +133,18 @@ export function matchJiraIssue(
   return runbooks
     .filter(isJiraSearchRunbook)
     .filter((r) => r.trigger.base === event.base && r.trigger.jql === event.jql)
+    .map((r) => ({ runbook: r, event }));
+}
+
+export function matchGcpCloudLogging(
+  event: Extract<TriggerEvent, { type: "gcp_cloud_logging" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isGcpCloudLoggingRunbook)
+    .filter(
+      (r) => r.trigger.project_id === event.project_id && r.trigger.filter === event.filter,
+    )
     .map((r) => ({ runbook: r, event }));
 }
 

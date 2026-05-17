@@ -13,6 +13,7 @@
 - `datadog_monitors` トリガー: Datadog Monitor を `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
 - `datadog_logs` トリガー: Datadog Logs Search を `interval_sec` 間隔でポーリングし、log entry 1 件ごとに発火
 - `jira_search` トリガー: Jira の JQL 検索結果を `interval_sec` 間隔でポーリングし、issue 1 件ごとに発火（updated タイムスタンプで cursor 管理）
+- `gcp_cloud_logging` トリガー: GCP Cloud Logging を `interval_sec` 間隔でポーリングし、log entry 1 件ごとに発火
 - 実行ロジックは `agent:` ブロック単一。Claude Agent SDK で動的に Bash / Read / Edit などを使う
 - 外部 SaaS（Datadog / Jira / Slack 等）の呼び出し作法は **ランブック著者の `agent.prompt` 責務**。mihari 本体は preamble を注入しない
 - state は `~/.mihari/state/` にローカル保存
@@ -63,7 +64,8 @@ mihari/
 │   │   ├── aws-cloudwatch-alarms.ts
 │   │   ├── datadog-monitors.ts
 │   │   ├── datadog-logs.ts
-│   │   └── jira-search.ts
+│   │   ├── jira-search.ts
+│   │   └── gcp-cloud-logging.ts
 │   └── lib/
 │       ├── logger.ts
 │       └── idempotency.ts      # event → 決定的 12 hex キー
@@ -105,6 +107,7 @@ Executor.execute(runbook, event):
 ├── datadog-monitors/<sha1(site|sorted-monitor_tags)>.json   # per-monitor state map
 ├── datadog-logs/<sha1(site|query)>.json                     # cursor
 ├── jira-search/<sha1(base|jql)>.json                        # cursor
+├── gcp-cloud-logging/<sha1(project_id|filter)>.json         # cursor
 └── runs/<YYYY-MM-DD>/<run_id>.jsonl                         # 実行履歴（agent 単一の RunResult）
 ```
 
@@ -155,6 +158,7 @@ mihari 本体は SaaS 知識を持たない。`agent.providers` は 1.0 で廃�
 | CloudWatch Logs | `@aws-sdk/client-cloudwatch-logs`（`aws_cloudwatch_logs` トリガー使用時のみ動的 import） |
 | CloudWatch Alarms | `@aws-sdk/client-cloudwatch`（`aws_cloudwatch_alarms` トリガー使用時のみ動的 import） |
 | Datadog Monitors | `@datadog/datadog-api-client`（`datadog_monitors` / `datadog_logs` トリガー使用時のみ動的 import） |
+| GCP Cloud Logging | `@google-cloud/logging`（`gcp_cloud_logging` トリガー使用時のみ動的 import） |
 
 `@anthropic-ai/sdk`（単発 messages.create 用）は 1.0 で不要になり依存から外した。
 

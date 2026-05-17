@@ -165,9 +165,26 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
       interval_sec,
     };
   }
+  if (source === "gcp_cloud_logging") {
+    const project_id = mustString(raw, "project_id", file, "trigger.project_id");
+    const filter = mustString(raw, "filter", file, "trigger.filter");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    return {
+      source: "gcp_cloud_logging",
+      project_id,
+      filter,
+      interval_sec,
+    };
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", "aws_cloudwatch_alarms", "datadog_monitors", "datadog_logs", or "jira_search" (got: ${source})`,
+    `trigger.source must be one of: file, cron, aws_cloudwatch_logs, aws_cloudwatch_alarms, datadog_monitors, datadog_logs, jira_search, gcp_cloud_logging (got: ${source})`,
   );
 }
 

@@ -40,6 +40,11 @@ import {
   createJiraSearchApiFactory,
   uniqueJiraSearchTriggers,
 } from "../triggers/jira-search.js";
+import {
+  GcpCloudLoggingPoller,
+  createGcpCloudLoggingApiFactory,
+  uniqueGcpCloudLoggingTriggers,
+} from "../triggers/gcp-cloud-logging.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -248,6 +253,7 @@ interface Ctx {
   datadogMonitorsPollers: DatadogMonitorsPoller[];
   datadogLogsPollers: DatadogLogsPoller[];
   jiraSearchPollers: JiraSearchPoller[];
+  gcpCloudLoggingPollers: GcpCloudLoggingPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
@@ -265,6 +271,9 @@ function triggerSummary(t: Trigger): string {
   }
   if (t.source === "jira_search") {
     return `jira_search:${t.base}|${t.jql}`;
+  }
+  if (t.source === "gcp_cloud_logging") {
+    return `gcp_cloud_logging:${t.project_id}|${t.filter}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -372,6 +381,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const gcpGroups = uniqueGcpCloudLoggingTriggers(runbooks);
+  const gcpCloudLoggingPollers: GcpCloudLoggingPoller[] = [];
+  if (gcpGroups.length > 0) {
+    const factory = await createGcpCloudLoggingApiFactory();
+    for (const g of gcpGroups) {
+      gcpCloudLoggingPollers.push(
+        new GcpCloudLoggingPoller(
+          { projectId: g.projectId, filter: g.filter },
+          g.intervalSec,
+          state,
+          factory.forProject(g.projectId),
+        ),
+      );
+    }
+  }
+
   return {
     runbooks,
     state,
@@ -383,6 +408,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     datadogMonitorsPollers,
     datadogLogsPollers,
     jiraSearchPollers,
+    gcpCloudLoggingPollers,
   };
 }
 

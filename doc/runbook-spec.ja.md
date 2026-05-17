@@ -141,6 +141,26 @@ trigger:
 
 カーソルは Jira issue の `updated` を ms 値で保持し、同 ms に並ぶ issue_key を境界 dedup 用に保持する。`updated >=` の JQL 比較は分粒度なので、分境界に丸めた時刻をフィルタに使う。1 tick の startAt ページング cap は 50。
 
+### `gcp_cloud_logging`
+
+```yaml
+trigger:
+  source: gcp_cloud_logging
+  project_id: my-project
+  filter: 'severity>=ERROR resource.type="cloud_function"'   # GCP Logging のクエリ
+  interval_sec: 60
+```
+
+| フィールド | 役割 |
+|---|---|
+| `project_id` | GCP プロジェクト ID |
+| `filter` | Cloud Logging のフィルタ式 |
+| `interval_sec` | ポーリング間隔（秒） |
+
+認証は GCP SDK の標準チェーン（`GOOGLE_APPLICATION_CREDENTIALS` / metadata server 等）に委譲。SDK は当該トリガーが存在するときのみ動的 import。同じ `(project_id, filter)` を購読する複数ランブックは 1 つのポーラーを共有する。
+
+カーソルは insertId とタイムスタンプの組で管理する（`aws_cloudwatch_logs` と同じ形）。ユーザ filter に加えて poller 側で `timestamp >= ...` を AND で重ねるので、フィルタ式自体に時刻条件を入れる必要はない。
+
 
 ```yaml
 agent:
@@ -190,8 +210,8 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 
 主要なテンプレ変数（トリガー別に値が変わるもの）:
 
-- `{{ event.line }}` — file の行 / aws_cloudwatch_logs の message / datadog_log の message
-- `{{ event.path }}` — file のパス / aws_cloudwatch_logs の log_group / datadog_log の query
+- `{{ event.line }}` — file の行 / aws_cloudwatch_logs の message / datadog_log の message / gcp_cloud_logging の message
+- `{{ event.path }}` — file のパス / aws_cloudwatch_logs の log_group / datadog_log の query / gcp_cloud_logging の logName
 - `{{ event.timestamp }}` — すべて。発火または遷移観測時刻（ISO 8601）
 - `{{ event.log_stream }}` — aws_cloudwatch_logs のみ
 - `{{ event.service }}` — datadog_log のみ
@@ -199,6 +219,7 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 - `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm のみ
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor のみ
 - `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue のみ
+- `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging のみ
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
 
@@ -226,3 +247,4 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm 遷移 → PagerDuty trigger/resolve
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack 通知
+- `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack 通知

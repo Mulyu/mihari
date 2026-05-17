@@ -141,6 +141,26 @@ Authentication is basic auth built from env `JIRA_USER` / `JIRA_TOKEN`. No SDK i
 
 The cursor is the Jira issue `updated` time in ms, with the issue keys at the boundary ms kept for dedup. The JQL `updated >=` comparison is minute-granular, so the filter time is floored to a minute boundary. Per-tick `startAt` pagination caps at 50 pages.
 
+### `gcp_cloud_logging`
+
+```yaml
+trigger:
+  source: gcp_cloud_logging
+  project_id: my-project
+  filter: 'severity>=ERROR resource.type="cloud_function"'   # Cloud Logging filter
+  interval_sec: 60
+```
+
+| Field | Purpose |
+|---|---|
+| `project_id` | GCP project id |
+| `filter` | Cloud Logging filter expression |
+| `interval_sec` | Polling interval in seconds |
+
+Authentication is delegated to the GCP SDK default chain (`GOOGLE_APPLICATION_CREDENTIALS` / metadata server / workload identity, etc.). The SDK is dynamically imported only when this trigger is present. Multiple runbooks subscribing to the same `(project_id, filter)` share one poller.
+
+The cursor combines insertId and timestamp (same shape as `aws_cloudwatch_logs`). The user-supplied filter is AND-combined with `timestamp >= ...` by the poller, so you do not need to include a time clause in your filter.
+
 ## Agent
 
 ```yaml
@@ -191,8 +211,8 @@ Templates are expanded with `{{ ... }}` inside `agent.prompt` and `agent.system`
 
 Per-trigger template variables (those whose value depends on the trigger source):
 
-- `{{ event.line }}` — file: the matched line / aws_cloudwatch_logs: the message / datadog_log: the message
-- `{{ event.path }}` — file: the log path / aws_cloudwatch_logs: the log_group / datadog_log: the query
+- `{{ event.line }}` — file: the matched line / aws_cloudwatch_logs: the message / datadog_log: the message / gcp_cloud_logging: the message
+- `{{ event.path }}` — file: the log path / aws_cloudwatch_logs: the log_group / datadog_log: the query / gcp_cloud_logging: the logName
 - `{{ event.timestamp }}` — all triggers. Time of firing or transition observation (ISO 8601)
 - `{{ event.log_stream }}` — aws_cloudwatch_logs only
 - `{{ event.service }}` — datadog_log only
@@ -200,6 +220,7 @@ Per-trigger template variables (those whose value depends on the trigger source)
 - `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm only
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor only
 - `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue only
+- `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging only
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
 
@@ -227,3 +248,4 @@ See `runbooks/examples/`:
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm transitions → PagerDuty trigger/resolve
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack notification
+- `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack notification

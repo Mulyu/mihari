@@ -4,6 +4,7 @@ import {
   matchAwsCloudWatchLogs,
   matchDatadogLog,
   matchDatadogMonitor,
+  matchGcpCloudLogging,
   matchJiraIssue,
 } from "./matcher.js";
 import type { Executor } from "./executor.js";
@@ -14,6 +15,7 @@ import type { AwsCloudWatchAlarmsPoller } from "../triggers/aws-cloudwatch-alarm
 import type { DatadogMonitorsPoller } from "../triggers/datadog-monitors.js";
 import type { DatadogLogsPoller } from "../triggers/datadog-logs.js";
 import type { JiraSearchPoller } from "../triggers/jira-search.js";
+import type { GcpCloudLoggingPoller } from "../triggers/gcp-cloud-logging.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
 
@@ -27,6 +29,7 @@ export interface DispatcherInput {
   datadogMonitorsPollers?: DatadogMonitorsPoller[];
   datadogLogsPollers?: DatadogLogsPoller[];
   jiraSearchPollers?: JiraSearchPoller[];
+  gcpCloudLoggingPollers?: GcpCloudLoggingPoller[];
   executor: Executor;
   state: StateStore;
 }
@@ -157,6 +160,26 @@ export async function tick(
         if (opts.dryRun) {
           opts.onDryRun?.(
             `${m.runbook.id} <- jira_search:${event.base}|${event.jql}: ${event.issue_key} ${event.status}`,
+          );
+          continue;
+        }
+        const result = await input.executor.execute(m.runbook, m.event);
+        if (!result.ok) ok = false;
+      }
+    }
+  }
+
+  for (const gcpPoller of input.gcpCloudLoggingPollers ?? []) {
+    const events = await gcpPoller.tick(new Date(), opts.dryRun ?? false);
+    for (const event of events) {
+      const matches = matchGcpCloudLogging(event, input.runbooks);
+      for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
+        fired++;
+        if (opts.dryRun) {
+          opts.onDryRun?.(
+            `${m.runbook.id} <- gcp_cloud_logging:${event.project_id}|${event.filter}: ${event.message}`,
           );
           continue;
         }

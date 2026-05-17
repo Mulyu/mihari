@@ -1,7 +1,7 @@
 import type { AgentContext } from "../types/index.js";
 
 const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 export function substituteTemplate(text: string, ctx: AgentContext): string {
   return text.replace(TEMPLATE_RE, (raw, key: string) => {
@@ -25,11 +25,21 @@ export function substituteTemplate(text: string, ctx: AgentContext): string {
     if (key === "event.monitor_name") {
       return ctx.event.type === "datadog_monitor" ? ctx.event.monitor_name : "";
     }
+    if (key === "event.alarm_name") {
+      return ctx.event.type === "aws_cloudwatch_alarm" ? ctx.event.alarm_name : "";
+    }
+    if (key === "event.alarm_arn") {
+      return ctx.event.type === "aws_cloudwatch_alarm" ? ctx.event.alarm_arn : "";
+    }
     if (key === "event.from_state") {
-      return ctx.event.type === "datadog_monitor" ? ctx.event.from_state : "";
+      if (ctx.event.type === "datadog_monitor") return ctx.event.from_state;
+      if (ctx.event.type === "aws_cloudwatch_alarm") return ctx.event.from_state;
+      return "";
     }
     if (key === "event.to_state") {
-      return ctx.event.type === "datadog_monitor" ? ctx.event.to_state : "";
+      if (ctx.event.type === "datadog_monitor") return ctx.event.to_state;
+      if (ctx.event.type === "aws_cloudwatch_alarm") return ctx.event.to_state;
+      return "";
     }
     if (key.startsWith("env.")) return process.env[key.slice(4)] ?? "";
     return raw;

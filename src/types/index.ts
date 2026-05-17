@@ -1,4 +1,9 @@
-export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger | DatadogMonitorsTrigger;
+export type Trigger =
+  | FileTrigger
+  | CronTrigger
+  | AwsCloudWatchLogsTrigger
+  | AwsCloudWatchAlarmsTrigger
+  | DatadogMonitorsTrigger;
 
 export interface Runbook {
   id: string;
@@ -26,6 +31,16 @@ export interface AwsCloudWatchLogsTrigger {
   region: string;
   log_group: string;
   pattern?: RegExp;
+  interval_sec: number;
+}
+
+export type AwsCloudWatchAlarmState = "OK" | "ALARM" | "INSUFFICIENT_DATA";
+
+export interface AwsCloudWatchAlarmsTrigger {
+  source: "aws_cloudwatch_alarms";
+  region: string;
+  alarm_names?: string[];
+  transitions: AwsCloudWatchAlarmState[];
   interval_sec: number;
 }
 
@@ -73,6 +88,16 @@ export type TriggerEvent =
       timestamp_ms: number;
     }
   | {
+      type: "aws_cloudwatch_alarm";
+      region: string;
+      alarm_names: string[];
+      alarm_name: string;
+      alarm_arn: string;
+      from_state: AwsCloudWatchAlarmState;
+      to_state: AwsCloudWatchAlarmState;
+      timestamp: string;
+    }
+  | {
       type: "datadog_monitor";
       site: string;
       monitor_tags: string[];
@@ -111,6 +136,13 @@ export interface AwsCloudWatchLogsPollerState {
   log_group: string;
   last_event_timestamp_ms: number;
   last_event_ids: string[];
+  last_polled_at: string;
+}
+
+export interface AwsCloudWatchAlarmsPollerState {
+  region: string;
+  alarm_names: string[];
+  alarm_states: Record<string, AwsCloudWatchAlarmState>;
   last_polled_at: string;
 }
 

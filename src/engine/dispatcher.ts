@@ -1,8 +1,14 @@
-import { match, matchAwsCloudWatchLogs, matchDatadogMonitor } from "./matcher.js";
+import {
+  match,
+  matchAwsCloudWatchAlarm,
+  matchAwsCloudWatchLogs,
+  matchDatadogMonitor,
+} from "./matcher.js";
 import type { Executor } from "./executor.js";
 import type { CronScheduler } from "../triggers/cron.js";
 import type { FilePoller } from "../triggers/file.js";
 import type { AwsCloudWatchLogsPoller } from "../triggers/aws-cloudwatch-logs.js";
+import type { AwsCloudWatchAlarmsPoller } from "../triggers/aws-cloudwatch-alarms.js";
 import type { DatadogMonitorsPoller } from "../triggers/datadog-monitors.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
@@ -13,6 +19,7 @@ export interface DispatcherInput {
   cronSchedulers: CronScheduler[];
   // 配線していないテスト互換のため optional。本番 (CLI bootstrap) では必ず配列で渡す。
   awsCloudWatchLogsPollers?: AwsCloudWatchLogsPoller[];
+  awsCloudWatchAlarmsPollers?: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers?: DatadogMonitorsPoller[];
   executor: Executor;
   state: StateStore;
@@ -64,6 +71,26 @@ export async function tick(
         if (opts.dryRun) {
           opts.onDryRun?.(
             `${m.runbook.id} <- aws_cloudwatch_logs:${event.log_group}/${event.log_stream}: ${event.message}`,
+          );
+          continue;
+        }
+        const result = await input.executor.execute(m.runbook, m.event);
+        if (!result.ok) ok = false;
+      }
+    }
+  }
+
+  for (const alarmPoller of input.awsCloudWatchAlarmsPollers ?? []) {
+    const events = await alarmPoller.tick(new Date(), opts.dryRun ?? false);
+    for (const event of events) {
+      const matches = matchAwsCloudWatchAlarm(event, input.runbooks);
+      for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
+        fired++;
+        if (opts.dryRun) {
+          opts.onDryRun?.(
+            `${m.runbook.id} <- aws_cloudwatch_alarms:${event.region}|${event.alarm_names.join(",")}: ${event.alarm_name} (${event.from_state} -> ${event.to_state})`,
           );
           continue;
         }

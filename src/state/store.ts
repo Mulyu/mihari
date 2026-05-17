@@ -12,6 +12,8 @@ import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { logger } from "../lib/logger.js";
 import type {
+  AwsCloudWatchAlarmState,
+  AwsCloudWatchAlarmsPollerState,
   AwsCloudWatchLogsPollerState,
   DatadogMonitorState,
   DatadogMonitorsPollerState,
@@ -34,6 +36,7 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "pollers"), { recursive: true });
     mkdirSync(join(this.baseDir, "triggers"), { recursive: true });
     mkdirSync(join(this.baseDir, "aws-cloudwatch-logs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "aws-cloudwatch-alarms"), { recursive: true });
     mkdirSync(join(this.baseDir, "datadog-monitors"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
@@ -146,6 +149,54 @@ export class StateStore {
       log.warn(
         { file, err: (e as Error).message },
         "aws-cloudwatch-logs state write failed",
+      );
+    }
+  }
+
+  awsCloudWatchAlarmsStateFile(key: { region: string; alarmNames: string[] }): string {
+    const namesPart = [...key.alarmNames].sort().join(",");
+    const hash = createHash("sha1")
+      .update(`${key.region}|${namesPart}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "aws-cloudwatch-alarms", `${hash}.json`);
+  }
+
+  loadAwsCloudWatchAlarmsState(key: {
+    region: string;
+    alarmNames: string[];
+  }): AwsCloudWatchAlarmsPollerState | null {
+    const file = this.awsCloudWatchAlarmsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateAwsCloudWatchAlarmsState(obj)) {
+        log.warn({ file }, "aws-cloudwatch-alarms state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "aws-cloudwatch-alarms state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveAwsCloudWatchAlarmsState(state: AwsCloudWatchAlarmsPollerState): Promise<void> {
+    const file = this.awsCloudWatchAlarmsStateFile({
+      region: state.region,
+      alarmNames: state.alarm_names,
+    });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn(
+        { file, err: (e as Error).message },
+        "aws-cloudwatch-alarms state write failed",
       );
     }
   }
@@ -354,6 +405,27 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   const ids = o["last_event_ids"];
   if (!Array.isArray(ids)) return false;
   return ids.every((x) => typeof x === "string");
+}
+
+const AWS_CLOUDWATCH_ALARM_STATE_VALUES: readonly AwsCloudWatchAlarmState[] = [
+  "OK",
+  "ALARM",
+  "INSUFFICIENT_DATA",
+];
+
+function validateAwsCloudWatchAlarmsState(v: unknown): v is AwsCloudWatchAlarmsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o["region"] !== "string" || typeof o["last_polled_at"] !== "string") return false;
+  const names = o["alarm_names"];
+  if (!Array.isArray(names) || !names.every((n) => typeof n === "string")) return false;
+  const states = o["alarm_states"];
+  if (typeof states !== "object" || states === null || Array.isArray(states)) return false;
+  for (const value of Object.values(states as Record<string, unknown>)) {
+    if (typeof value !== "string") return false;
+    if (!(AWS_CLOUDWATCH_ALARM_STATE_VALUES as readonly string[]).includes(value)) return false;
+  }
+  return true;
 }
 
 const DATADOG_MONITOR_STATE_VALUES: readonly DatadogMonitorState[] = [

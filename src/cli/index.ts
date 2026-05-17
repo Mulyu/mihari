@@ -21,6 +21,11 @@ import {
   uniqueAwsCloudWatchLogsTriggers,
 } from "../triggers/aws-cloudwatch-logs.js";
 import {
+  AwsCloudWatchAlarmsPoller,
+  createAwsCloudWatchAlarmsApiFactory,
+  uniqueAwsCloudWatchAlarmsTriggers,
+} from "../triggers/aws-cloudwatch-alarms.js";
+import {
   DatadogMonitorsPoller,
   createDatadogMonitorsApiFactory,
   uniqueDatadogMonitorsTriggers,
@@ -229,6 +234,7 @@ interface Ctx {
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
   awsCloudWatchLogsPollers: AwsCloudWatchLogsPoller[];
+  awsCloudWatchAlarmsPollers: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers: DatadogMonitorsPoller[];
 }
 
@@ -237,6 +243,10 @@ function triggerSummary(t: Trigger): string {
   if (t.source === "cron") return `cron:${t.schedule}`;
   if (t.source === "aws_cloudwatch_logs") {
     return `aws_cloudwatch_logs:${t.region}/${t.log_group}`;
+  }
+  if (t.source === "aws_cloudwatch_alarms") {
+    const names = (t.alarm_names ?? []).join(",");
+    return `aws_cloudwatch_alarms:${t.region}|${names}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -280,6 +290,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const alarmGroups = uniqueAwsCloudWatchAlarmsTriggers(runbooks);
+  const awsCloudWatchAlarmsPollers: AwsCloudWatchAlarmsPoller[] = [];
+  if (alarmGroups.length > 0) {
+    const factory = await createAwsCloudWatchAlarmsApiFactory();
+    for (const g of alarmGroups) {
+      awsCloudWatchAlarmsPollers.push(
+        new AwsCloudWatchAlarmsPoller(
+          { region: g.region, alarmNames: g.alarmNames },
+          g.intervalSec,
+          state,
+          factory.forRegion(g.region),
+        ),
+      );
+    }
+  }
+
   const ddGroups = uniqueDatadogMonitorsTriggers(runbooks);
   const datadogMonitorsPollers: DatadogMonitorsPoller[] = [];
   if (ddGroups.length > 0) {
@@ -303,6 +329,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     pollers,
     cronSchedulers,
     awsCloudWatchLogsPollers,
+    awsCloudWatchAlarmsPollers,
     datadogMonitorsPollers,
   };
 }

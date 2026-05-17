@@ -1,7 +1,17 @@
 import { Cron } from "croner";
-import type { DatadogMonitorState, Trigger } from "../types/index.js";
+import type {
+  AwsCloudWatchAlarmState,
+  DatadogMonitorState,
+  Trigger,
+} from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
 import { isObject, mustString, optionalNumber, optionalString } from "./primitives.js";
+
+const AWS_CLOUDWATCH_ALARM_STATES: readonly AwsCloudWatchAlarmState[] = [
+  "OK",
+  "ALARM",
+  "INSUFFICIENT_DATA",
+];
 
 const DATADOG_MONITOR_STATES: readonly DatadogMonitorState[] = [
   "alert",
@@ -74,6 +84,26 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     if (pattern !== undefined) t.pattern = pattern;
     return t;
   }
+  if (source === "aws_cloudwatch_alarms") {
+    const region = mustString(raw, "region", file, "trigger.region");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const alarm_names = parseStringArray(raw, "alarm_names", file, "trigger.alarm_names");
+    const transitions = parseAwsCloudWatchAlarmTransitions(raw, file);
+    const t: Trigger = {
+      source: "aws_cloudwatch_alarms",
+      region,
+      transitions,
+      interval_sec,
+    };
+    if (alarm_names !== undefined) t.alarm_names = alarm_names;
+    return t;
+  }
   if (source === "datadog_monitors") {
     const site = mustString(raw, "site", file, "trigger.site");
     const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
@@ -96,8 +126,37 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
   }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", or "datadog_monitors" (got: ${source})`,
+    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", "aws_cloudwatch_alarms", or "datadog_monitors" (got: ${source})`,
   );
+}
+
+function parseAwsCloudWatchAlarmTransitions(
+  raw: Record<string, unknown>,
+  file: string,
+): AwsCloudWatchAlarmState[] {
+  const v = raw["transitions"];
+  if (v === undefined) return ["ALARM"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.transitions must be a non-empty array of state literals",
+    );
+  }
+  const out: AwsCloudWatchAlarmState[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !isAwsCloudWatchAlarmState(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.transitions entries must be one of: ${AWS_CLOUDWATCH_ALARM_STATES.join(", ")} (got: ${String(item)})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function isAwsCloudWatchAlarmState(s: string): s is AwsCloudWatchAlarmState {
+  return (AWS_CLOUDWATCH_ALARM_STATES as readonly string[]).includes(s);
 }
 
 function parseStringArray(

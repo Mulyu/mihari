@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type {
+  AwsCloudWatchAlarmsTrigger,
   AwsCloudWatchLogsTrigger,
   DatadogMonitorsTrigger,
   FileTrigger,
@@ -10,6 +11,7 @@ import type {
 
 type FileRunbook = Runbook & { trigger: FileTrigger };
 type AwsCloudWatchLogsRunbook = Runbook & { trigger: AwsCloudWatchLogsTrigger };
+type AwsCloudWatchAlarmsRunbook = Runbook & { trigger: AwsCloudWatchAlarmsTrigger };
 type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
@@ -18,6 +20,10 @@ function isFileRunbook(rb: Runbook): rb is FileRunbook {
 
 function isAwsCloudWatchLogsRunbook(rb: Runbook): rb is AwsCloudWatchLogsRunbook {
   return rb.trigger.source === "aws_cloudwatch_logs";
+}
+
+function isAwsCloudWatchAlarmsRunbook(rb: Runbook): rb is AwsCloudWatchAlarmsRunbook {
+  return rb.trigger.source === "aws_cloudwatch_alarms";
 }
 
 function isDatadogMonitorsRunbook(rb: Runbook): rb is DatadogMonitorsRunbook {
@@ -50,6 +56,25 @@ export function matchAwsCloudWatchLogs(
         r.trigger.log_group === event.log_group &&
         (r.trigger.pattern === undefined || r.trigger.pattern.test(event.message)),
     )
+    .map((r) => ({ runbook: r, event }));
+}
+
+// CloudWatch Alarm の状態遷移は poller が全件 emit する。runbook 側は
+// `(region, alarm_names)` の購読キーが一致し、かつ `transitions` に到達状態が
+// 含まれる場合に発火する（datadog_monitors と同じパターン）。
+export function matchAwsCloudWatchAlarm(
+  event: Extract<TriggerEvent, { type: "aws_cloudwatch_alarm" }>,
+  runbooks: Runbook[],
+): Match[] {
+  const eventNames = [...event.alarm_names].sort().join(",");
+  return runbooks
+    .filter(isAwsCloudWatchAlarmsRunbook)
+    .filter((r) => {
+      if (r.trigger.region !== event.region) return false;
+      const triggerNames = [...(r.trigger.alarm_names ?? [])].sort().join(",");
+      if (triggerNames !== eventNames) return false;
+      return r.trigger.transitions.includes(event.to_state);
+    })
     .map((r) => ({ runbook: r, event }));
 }
 

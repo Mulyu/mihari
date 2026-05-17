@@ -62,6 +62,29 @@ trigger:
 
 Authentication is delegated entirely to the AWS SDK default credential chain (env vars / `~/.aws/credentials` / IAM role). mihari exposes no auth fields. The SDK is dynamically imported only when at least one runbook uses this trigger. If two runbooks subscribe to the same `(region, log_group)` they share one poller; the effective `interval_sec` is the minimum of the subscribers.
 
+### `aws_cloudwatch_alarms`
+
+```yaml
+trigger:
+  source: aws_cloudwatch_alarms
+  region: us-east-1
+  alarm_names:                 # optional. Omit to subscribe to every alarm in the region.
+    - prod-checkout-5xx
+  transitions:                 # optional. "to" states to fire on. Default ["ALARM"]
+    - ALARM
+    - OK
+  interval_sec: 60
+```
+
+| Field | Purpose |
+|---|---|
+| `region` | AWS region |
+| `alarm_names` | List of alarm names to subscribe to (omit = every alarm in the region) |
+| `transitions` | "To" states that fire the runbook. One of `OK` / `ALARM` / `INSUFFICIENT_DATA` (CloudWatch literals, kept as-is) |
+| `interval_sec` | Polling interval in seconds |
+
+Authentication uses the AWS SDK default credential chain (same as `aws_cloudwatch_logs`). The SDK is dynamically imported only when this trigger is present. If multiple runbooks subscribe to the same `(region, alarm_names)` they share one poller and each runbook's `transitions` filter is applied independently in the matcher. Both MetricAlarm and CompositeAlarm are subscribed.
+
 ### `datadog_monitors`
 
 ```yaml
@@ -126,17 +149,19 @@ See `runbooks/examples/dd-monitor-jira.yaml` for a concrete example. `MIHARI_IDE
 
 Templates are expanded with `{{ ... }}` inside `agent.prompt` and `agent.system` (and the corresponding `_file` variants).
 
-| Variable | `file` | `cron` | `aws_cloudwatch_logs` | `datadog_monitors` |
-|------|--------|--------|---|---|
-| `{{ event.line }}` | The matched line | Empty string | The event message | Empty string |
-| `{{ event.path }}` | Path to the log file | Empty string | The log group name | Empty string |
-| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing | Event timestamp | Time the transition was observed |
-| `{{ event.log_stream }}` | Empty string | Empty string | The log stream name | Empty string |
-| `{{ event.monitor_id }}` | Empty string | Empty string | Empty string | Datadog monitor id |
-| `{{ event.monitor_name }}` | Empty string | Empty string | Empty string | Datadog monitor name |
-| `{{ event.from_state }}` | Empty string | Empty string | Empty string | Previous monitor state |
-| `{{ event.to_state }}` | Empty string | Empty string | Empty string | Current monitor state |
-| `{{ env.<NAME> }}` | `process.env[NAME]` | same | same | same |
+| Variable | `file` | `cron` | `aws_cloudwatch_logs` | `aws_cloudwatch_alarms` | `datadog_monitors` |
+|------|--------|--------|---|---|---|
+| `{{ event.line }}` | The matched line | Empty string | The event message | Empty string | Empty string |
+| `{{ event.path }}` | Path to the log file | Empty string | The log group name | Empty string | Empty string |
+| `{{ event.timestamp }}` | Time the line was read (ISO 8601) | Time of firing | Event timestamp | Transition-observed time | Transition-observed time |
+| `{{ event.log_stream }}` | Empty string | Empty string | The log stream name | Empty string | Empty string |
+| `{{ event.monitor_id }}` | Empty string | Empty string | Empty string | Empty string | Datadog monitor id |
+| `{{ event.monitor_name }}` | Empty string | Empty string | Empty string | Empty string | Datadog monitor name |
+| `{{ event.alarm_name }}` | Empty string | Empty string | Empty string | CloudWatch alarm name | Empty string |
+| `{{ event.alarm_arn }}` | Empty string | Empty string | Empty string | CloudWatch alarm ARN | Empty string |
+| `{{ event.from_state }}` | Empty string | Empty string | Empty string | Previous alarm state | Previous monitor state |
+| `{{ event.to_state }}` | Empty string | Empty string | Empty string | Current alarm state | Current monitor state |
+| `{{ env.<NAME> }}` | `process.env[NAME]` | same | same | same | same |
 
 Inside the agent's Bash tool, mihari additionally injects:
 
@@ -157,3 +182,4 @@ See `runbooks/examples/`:
 - `file-slack-alert.yaml` — Application log ERROR → Slack triage
 - `cron-health-agent.yaml` — Periodic health check → Slack on failure
 - `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack triage
+- `cw-alarm-pagerduty.yaml` — CloudWatch alarm transitions → PagerDuty trigger/resolve

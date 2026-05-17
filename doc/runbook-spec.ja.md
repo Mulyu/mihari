@@ -62,6 +62,29 @@ trigger:
 
 認証は AWS SDK の標準チェーン（環境変数 / `~/.aws/credentials` / IAM ロール）に完全委譲。mihari は YAML に認証フィールドを置かない。SDK は当該トリガーが存在する時のみ動的 import。同じ `(region, log_group)` を購読する複数ランブックは 1 つのポーラーを共有し、`interval_sec` は最小値が採用される。
 
+### `aws_cloudwatch_alarms`
+
+```yaml
+trigger:
+  source: aws_cloudwatch_alarms
+  region: us-east-1
+  alarm_names:                 # 任意。省略するとリージョン内の全アラームを購読
+    - prod-checkout-5xx
+  transitions:                 # 任意。発火する遷移先 state。既定 ["ALARM"]
+    - ALARM
+    - OK
+  interval_sec: 60
+```
+
+| フィールド | 役割 |
+|---|---|
+| `region` | AWS リージョン |
+| `alarm_names` | 監視対象アラーム名のリスト（省略時は region 内全体） |
+| `transitions` | 発火する遷移先 state。`OK` / `ALARM` / `INSUFFICIENT_DATA` のいずれか（CloudWatch のリテラルそのまま） |
+| `interval_sec` | ポーリング間隔（秒） |
+
+認証は AWS SDK 標準チェーン（`aws_cloudwatch_logs` と同じ）。SDK は当該トリガーが存在するときのみ動的 import。同じ `(region, alarm_names)` を購読する複数ランブックは 1 つのポーラーを共有し、`transitions` フィルタは matcher 側で個別適用される。MetricAlarm と CompositeAlarm の両方を購読する。
+
 ### `datadog_monitors`
 
 ```yaml
@@ -126,17 +149,19 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 
 `agent.prompt` / `agent.system` および対応する `_file` の中身は `{{ ... }}` で展開される。
 
-| 変数 | `file` | `cron` | `aws_cloudwatch_logs` | `datadog_monitors` |
-|------|--------|--------|---|---|
-| `{{ event.line }}` | マッチ行 | 空文字 | event の message | 空文字 |
-| `{{ event.path }}` | ログファイルパス | 空文字 | log_group 名 | 空文字 |
-| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO 8601) | 発火時刻 | event の timestamp | 遷移観測時刻 |
-| `{{ event.log_stream }}` | 空文字 | 空文字 | log_stream 名 | 空文字 |
-| `{{ event.monitor_id }}` | 空文字 | 空文字 | 空文字 | Datadog monitor id |
-| `{{ event.monitor_name }}` | 空文字 | 空文字 | 空文字 | Datadog monitor 名 |
-| `{{ event.from_state }}` | 空文字 | 空文字 | 空文字 | 直前の monitor state |
-| `{{ event.to_state }}` | 空文字 | 空文字 | 空文字 | 現在の monitor state |
-| `{{ env.<NAME> }}` | `process.env[NAME]` | 同左 | 同左 | 同左 |
+| 変数 | `file` | `cron` | `aws_cloudwatch_logs` | `aws_cloudwatch_alarms` | `datadog_monitors` |
+|------|--------|--------|---|---|---|
+| `{{ event.line }}` | マッチ行 | 空文字 | event の message | 空文字 | 空文字 |
+| `{{ event.path }}` | ログファイルパス | 空文字 | log_group 名 | 空文字 | 空文字 |
+| `{{ event.timestamp }}` | 行を読んだ時刻 (ISO 8601) | 発火時刻 | event の timestamp | 遷移観測時刻 | 遷移観測時刻 |
+| `{{ event.log_stream }}` | 空文字 | 空文字 | log_stream 名 | 空文字 | 空文字 |
+| `{{ event.monitor_id }}` | 空文字 | 空文字 | 空文字 | 空文字 | Datadog monitor id |
+| `{{ event.monitor_name }}` | 空文字 | 空文字 | 空文字 | 空文字 | Datadog monitor 名 |
+| `{{ event.alarm_name }}` | 空文字 | 空文字 | 空文字 | CloudWatch alarm 名 | 空文字 |
+| `{{ event.alarm_arn }}` | 空文字 | 空文字 | 空文字 | CloudWatch alarm ARN | 空文字 |
+| `{{ event.from_state }}` | 空文字 | 空文字 | 空文字 | 直前の alarm state | 直前の monitor state |
+| `{{ event.to_state }}` | 空文字 | 空文字 | 空文字 | 現在の alarm state | 現在の monitor state |
+| `{{ env.<NAME> }}` | `process.env[NAME]` | 同左 | 同左 | 同左 | 同左 |
 
 エージェントの Bash tool 子プロセスには次が env として追加される:
 
@@ -157,3 +182,4 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `file-slack-alert.yaml` — アプリログ ERROR → Slack 一次切り分け
 - `cron-health-agent.yaml` — 定期 health check → 失敗時 Slack 通知
 - `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack 一次切り分け
+- `cw-alarm-pagerduty.yaml` — CloudWatch alarm 遷移 → PagerDuty trigger/resolve

@@ -1,0 +1,41 @@
+id: cw-alarm-pagerduty
+description: CloudWatch alarm の遷移を観測し、PagerDuty に incident を起こす / 解決する
+
+trigger:
+  source: aws_cloudwatch_alarms
+  region: us-east-1
+  alarm_names:
+    - prod-checkout-5xx
+    - prod-payments-latency
+  transitions:
+    - ALARM
+    - OK
+  interval_sec: 60
+
+cooldown_sec: 600
+
+agent:
+  prompt: |
+    CloudWatch alarm "{{ event.alarm_name }}" ({{ event.alarm_arn }}) が
+    {{ event.from_state }} -> {{ event.to_state }} に遷移した。
+
+    - to_state が ALARM なら PagerDuty に incident を作成する。
+      重複起票を避けるため、dedup_key には $MIHARI_IDEMPOTENCY_KEY を使う。
+    - to_state が OK なら同じ dedup_key の incident を resolve する。
+
+    認証: env $PAGERDUTY_ROUTING_KEY を Events API v2 の `routing_key` フィールドに送る。
+
+    Endpoint:
+      POST https://events.pagerduty.com/v2/enqueue
+        body: {
+          "routing_key": "$PAGERDUTY_ROUTING_KEY",
+          "event_action": "trigger" or "resolve",
+          "dedup_key": "$MIHARI_IDEMPOTENCY_KEY",
+          "payload": { "summary": "...", "source": "{{ event.alarm_name }}", "severity": "error" }
+        }
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 5
+  timeout_sec: 120

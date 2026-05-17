@@ -9,6 +9,7 @@
 - `file` トリガー: ログファイルを tail し、新規行が正規表現にマッチで発火
 - `cron` トリガー: 5フィールド cron 式で定期発火
 - `aws_cloudwatch_logs` トリガー: CloudWatch Logs を `interval_sec` 間隔でポーリングし、event 1 件ごとに発火
+- `aws_cloudwatch_alarms` トリガー: CloudWatch アラームを `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
 - `datadog_monitors` トリガー: Datadog Monitor を `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
 - 実行ロジックは `agent:` ブロック単一。Claude Agent SDK で動的に Bash / Read / Edit などを使う
 - 外部 SaaS（Datadog / Jira / Slack 等）の呼び出し作法は **ランブック著者の `agent.prompt` 責務**。mihari 本体は preamble を注入しない
@@ -57,6 +58,7 @@ mihari/
 │   │   ├── file.ts             # FilePoller
 │   │   ├── cron.ts             # CronScheduler
 │   │   ├── aws-cloudwatch-logs.ts
+│   │   ├── aws-cloudwatch-alarms.ts
 │   │   └── datadog-monitors.ts
 │   └── lib/
 │       ├── logger.ts
@@ -95,6 +97,7 @@ Executor.execute(runbook, event):
 ├── pollers/<sha1(path)>.json                                # FilePoller オフセット
 ├── triggers/<sha1(runbook_id)>.json                         # CronScheduler last_fired_at
 ├── aws-cloudwatch-logs/<sha1(region|group)>.json            # cursor
+├── aws-cloudwatch-alarms/<sha1(region|sorted-alarm_names)>.json  # per-alarm state map
 ├── datadog-monitors/<sha1(site|sorted-monitor_tags)>.json   # per-monitor state map
 └── runs/<YYYY-MM-DD>/<run_id>.jsonl                         # 実行履歴（agent 単一の RunResult）
 ```
@@ -144,7 +147,8 @@ mihari 本体は SaaS 知識を持たない。`agent.providers` は 1.0 で廃�
 | テスト | `vitest` |
 | Claude Agent SDK | `@anthropic-ai/claude-agent-sdk`（agent 実行時に動的 import） |
 | CloudWatch Logs | `@aws-sdk/client-cloudwatch-logs`（`aws_cloudwatch_logs` トリガー使用時のみ動的 import） |
-| Datadog Monitors | `@datadog/datadog-api-client`（`datadog_monitors` トリガー使用時のみ動的 import） |
+| CloudWatch Alarms | `@aws-sdk/client-cloudwatch`（`aws_cloudwatch_alarms` トリガー使用時のみ動的 import） |
+| Datadog Monitors | `@datadog/datadog-api-client`（`datadog_monitors` / `datadog_logs` トリガー使用時のみ動的 import） |
 
 `@anthropic-ai/sdk`（単発 messages.create 用）は 1.0 で不要になり依存から外した。
 

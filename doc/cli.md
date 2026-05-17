@@ -23,7 +23,7 @@ Logs are emitted as pino's structured JSON on stdout.
 
 ## `mihari daemon`
 
-Resident mode. Ticks file pollers, the cron scheduler, CloudWatch Logs pollers, and Datadog Monitors pollers at a fixed interval.
+Resident mode. Ticks file pollers, the cron scheduler, CloudWatch Logs pollers, CloudWatch Alarms pollers, and Datadog Monitors pollers at a fixed interval.
 
 ```bash
 mihari daemon --interval 30
@@ -64,7 +64,7 @@ Lists runbooks. Each row is `<id>\t<trigger>\t<description>`.
 mihari list
 ```
 
-The trigger column is rendered as `file:<path>`, `cron:<schedule>`, `aws_cloudwatch_logs:<region>|<log_group>`, or `datadog_monitors:<site>|<comma-joined monitor_tags>`.
+The trigger column is rendered as `file:<path>`, `cron:<schedule>`, `aws_cloudwatch_logs:<region>|<log_group>`, `aws_cloudwatch_alarms:<region>|<comma-joined alarm_names>`, or `datadog_monitors:<site>|<comma-joined monitor_tags>`.
 
 ## `mihari status`
 
@@ -83,7 +83,7 @@ cw-error-triage     aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03
 dd-monitor-jira     datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
 ```
 
-Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for `file`, `aws_cloudwatch_logs`, and `datadog_monitors` triggers.
+Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for `file`, `aws_cloudwatch_logs`, `aws_cloudwatch_alarms`, and `datadog_monitors` triggers.
 
 ## `mihari validate <path>`
 

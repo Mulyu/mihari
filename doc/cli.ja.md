@@ -23,7 +23,7 @@ mihari <command> [options]
 
 ## `mihari daemon`
 
-常駐モード。ファイルポーラー、cron スケジューラ、CloudWatch Logs ポーラー、Datadog Monitors ポーラーを定期間隔でティックする。
+常駐モード。ファイルポーラー、cron スケジューラ、CloudWatch Logs ポーラー、CloudWatch Alarms ポーラー、Datadog Monitors ポーラーを定期間隔でティックする。
 
 ```bash
 mihari daemon --interval 30
@@ -64,7 +64,7 @@ mihari run dd-monitor-jira
 mihari list
 ```
 
-トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` / `datadog_monitors:<site>|<カンマ区切り monitor_tags>` のいずれか。
+トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` / `aws_cloudwatch_alarms:<region>|<カンマ区切り alarm_names>` / `datadog_monitors:<site>|<カンマ区切り monitor_tags>` のいずれか。
 
 ## `mihari status`
 
@@ -83,7 +83,7 @@ cw-error-triage     aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03
 dd-monitor-jira     datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
 ```
 
-`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` / `aws_cloudwatch_logs` / `datadog_monitors` トリガーでは常に `-`。
+`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` / `aws_cloudwatch_logs` / `aws_cloudwatch_alarms` / `datadog_monitors` トリガーでは常に `-`。
 
 ## `mihari validate <path>`
 

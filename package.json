@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.85",
+    "@aws-sdk/client-cloudwatch": "3.1048.0",
     "@aws-sdk/client-cloudwatch-logs": "3.1043.0",
     "@datadog/datadog-api-client": "1.57.0",
     "commander": "14.0.3",

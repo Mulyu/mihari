@@ -1,0 +1,42 @@
+id: github-ci-fix
+description: example/app の main CI が失敗したら原因調査して修正 PR を出す
+
+trigger:
+  source: github_workflow_runs
+  repo: example/app
+  branch: main
+  workflows:
+    - ci.yml
+  conclusions:
+    - failure
+  interval_sec: 120
+
+cooldown_sec: 600
+
+agent:
+  conventions: true
+  prompt: |
+    GitHub Actions の workflow が example/app で失敗した:
+
+      workflow:   {{ event.workflow_name }}
+      run:        #{{ event.run_id }}
+      branch:     {{ event.branch }}
+      conclusion: {{ event.conclusion }}
+      url:        {{ event.html_url }}
+
+    手順:
+      1. gh run view {{ event.run_id }} --log で失敗ログを取得
+      2. 失敗箇所を特定し、テスト or コード or CI 設定の修正案を作る
+      3. conventions preamble に従って claude/fix-$MIHARI_IDEMPOTENCY_KEY ブランチで PR を作る
+
+    認証は env $GH_TOKEN（gh CLI と curl 両方で使う）。
+  allowed_tools:
+    - Read
+    - Edit
+    - Write
+    - "Bash(git:*)"
+    - "Bash(gh:*)"
+    - "Bash(npm:*)"
+  permission_mode: strict
+  max_turns: 50
+  timeout_sec: 1800

@@ -1,6 +1,13 @@
-export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger | DatadogMonitorsTrigger;
-
-export type Provider = "datadog" | "jira" | "slack";
+export type Trigger =
+  | FileTrigger
+  | CronTrigger
+  | AwsCloudWatchLogsTrigger
+  | AwsCloudWatchAlarmsTrigger
+  | DatadogMonitorsTrigger
+  | DatadogLogsTrigger
+  | JiraSearchTrigger
+  | GithubWorkflowRunsTrigger
+  | SentryIssuesTrigger;
 
 export interface Runbook {
   id: string;
@@ -31,6 +38,16 @@ export interface AwsCloudWatchLogsTrigger {
   interval_sec: number;
 }
 
+export type AwsCloudWatchAlarmState = "OK" | "ALARM" | "INSUFFICIENT_DATA";
+
+export interface AwsCloudWatchAlarmsTrigger {
+  source: "aws_cloudwatch_alarms";
+  region: string;
+  alarm_names?: string[];
+  transitions: AwsCloudWatchAlarmState[];
+  interval_sec: number;
+}
+
 export type DatadogMonitorState =
   | "alert"
   | "warn"
@@ -48,6 +65,46 @@ export interface DatadogMonitorsTrigger {
   interval_sec: number;
 }
 
+export interface DatadogLogsTrigger {
+  source: "datadog_logs";
+  site: string;
+  query: string;
+  interval_sec: number;
+}
+
+export interface JiraSearchTrigger {
+  source: "jira_search";
+  base: string;
+  jql: string;
+  interval_sec: number;
+}
+
+export interface GithubWorkflowRunsTrigger {
+  source: "github_workflow_runs";
+  repo: string;
+  branch?: string;
+  workflows?: string[];
+  conclusions: string[];
+  interval_sec: number;
+}
+
+export type SentryIssueLevel =
+  | "fatal"
+  | "error"
+  | "warning"
+  | "info"
+  | "debug"
+  | "sample";
+
+export interface SentryIssuesTrigger {
+  source: "sentry_issues";
+  base: string;
+  organization: string;
+  project: string;
+  levels: SentryIssueLevel[];
+  interval_sec: number;
+}
+
 export interface Agent {
   prompt: string;
   system?: string;
@@ -58,7 +115,6 @@ export interface Agent {
   timeout_sec: number;
   conventions: boolean;
   cwd?: string;
-  providers: Provider[];
 }
 
 export type TriggerEvent =
@@ -76,6 +132,16 @@ export type TriggerEvent =
       timestamp_ms: number;
     }
   | {
+      type: "aws_cloudwatch_alarm";
+      region: string;
+      alarm_names: string[];
+      alarm_name: string;
+      alarm_arn: string;
+      from_state: AwsCloudWatchAlarmState;
+      to_state: AwsCloudWatchAlarmState;
+      timestamp: string;
+    }
+  | {
       type: "datadog_monitor";
       site: string;
       monitor_tags: string[];
@@ -83,6 +149,57 @@ export type TriggerEvent =
       monitor_name: string;
       from_state: DatadogMonitorState;
       to_state: DatadogMonitorState;
+      timestamp: string;
+    }
+  | {
+      type: "datadog_log";
+      site: string;
+      query: string;
+      log_id: string;
+      service: string;
+      host: string;
+      message: string;
+      timestamp: string;
+      timestamp_ms: number;
+    }
+  | {
+      type: "jira_issue";
+      base: string;
+      jql: string;
+      issue_key: string;
+      summary: string;
+      status: string;
+      updated: string;
+      updated_ms: number;
+      timestamp: string;
+    }
+  | {
+      type: "github_workflow_run";
+      repo: string;
+      run_id: number;
+      run_number: number;
+      workflow_name: string;
+      workflow_path: string;
+      branch: string;
+      conclusion: string;
+      status: string;
+      html_url: string;
+      timestamp: string;
+    }
+  | {
+      type: "sentry_issue";
+      base: string;
+      organization: string;
+      project: string;
+      issue_id: string;
+      short_id: string;
+      title: string;
+      level: SentryIssueLevel;
+      status: string;
+      permalink: string;
+      first_seen: string;
+      last_seen: string;
+      is_new: boolean;
       timestamp: string;
     };
 
@@ -117,10 +234,47 @@ export interface AwsCloudWatchLogsPollerState {
   last_polled_at: string;
 }
 
+export interface AwsCloudWatchAlarmsPollerState {
+  region: string;
+  alarm_names: string[];
+  alarm_states: Record<string, AwsCloudWatchAlarmState>;
+  last_polled_at: string;
+}
+
 export interface DatadogMonitorsPollerState {
   site: string;
   monitor_tags: string[];
   monitor_states: Record<string, DatadogMonitorState>;
+  last_polled_at: string;
+}
+
+export interface DatadogLogsPollerState {
+  site: string;
+  query: string;
+  last_event_timestamp_ms: number;
+  last_event_ids: string[];
+  last_polled_at: string;
+}
+
+export interface JiraSearchPollerState {
+  base: string;
+  jql: string;
+  last_updated_ms: number;
+  last_issue_keys: string[];
+  last_polled_at: string;
+}
+
+export interface GithubWorkflowRunsPollerState {
+  repo: string;
+  last_run_id: number;
+  last_polled_at: string;
+}
+
+export interface SentryIssuesPollerState {
+  base: string;
+  organization: string;
+  project: string;
+  issue_last_seen_ms: Record<string, number>;
   last_polled_at: string;
 }
 

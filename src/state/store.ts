@@ -12,11 +12,17 @@ import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { logger } from "../lib/logger.js";
 import type {
+  AwsCloudWatchAlarmState,
+  AwsCloudWatchAlarmsPollerState,
   AwsCloudWatchLogsPollerState,
+  DatadogLogsPollerState,
   DatadogMonitorState,
   DatadogMonitorsPollerState,
+  GithubWorkflowRunsPollerState,
+  JiraSearchPollerState,
   PollerState,
   RunResult,
+  SentryIssuesPollerState,
   TriggerState,
 } from "../types/index.js";
 
@@ -34,7 +40,12 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "pollers"), { recursive: true });
     mkdirSync(join(this.baseDir, "triggers"), { recursive: true });
     mkdirSync(join(this.baseDir, "aws-cloudwatch-logs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "aws-cloudwatch-alarms"), { recursive: true });
     mkdirSync(join(this.baseDir, "datadog-monitors"), { recursive: true });
+    mkdirSync(join(this.baseDir, "datadog-logs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "jira-search"), { recursive: true });
+    mkdirSync(join(this.baseDir, "github-workflow-runs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "sentry-issues"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -150,6 +161,54 @@ export class StateStore {
     }
   }
 
+  awsCloudWatchAlarmsStateFile(key: { region: string; alarmNames: string[] }): string {
+    const namesPart = [...key.alarmNames].sort().join(",");
+    const hash = createHash("sha1")
+      .update(`${key.region}|${namesPart}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "aws-cloudwatch-alarms", `${hash}.json`);
+  }
+
+  loadAwsCloudWatchAlarmsState(key: {
+    region: string;
+    alarmNames: string[];
+  }): AwsCloudWatchAlarmsPollerState | null {
+    const file = this.awsCloudWatchAlarmsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateAwsCloudWatchAlarmsState(obj)) {
+        log.warn({ file }, "aws-cloudwatch-alarms state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "aws-cloudwatch-alarms state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveAwsCloudWatchAlarmsState(state: AwsCloudWatchAlarmsPollerState): Promise<void> {
+    const file = this.awsCloudWatchAlarmsStateFile({
+      region: state.region,
+      alarmNames: state.alarm_names,
+    });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn(
+        { file, err: (e as Error).message },
+        "aws-cloudwatch-alarms state write failed",
+      );
+    }
+  }
+
   datadogMonitorsStateFile(key: { site: string; monitorTags: string[] }): string {
     const tagsPart = [...key.monitorTags].sort().join(",");
     const hash = createHash("sha1")
@@ -195,6 +254,167 @@ export class StateStore {
         { file, err: (e as Error).message },
         "datadog-monitors state write failed",
       );
+    }
+  }
+
+  datadogLogsStateFile(key: { site: string; query: string }): string {
+    const hash = createHash("sha1")
+      .update(`${key.site}|${key.query}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "datadog-logs", `${hash}.json`);
+  }
+
+  loadDatadogLogsState(key: {
+    site: string;
+    query: string;
+  }): DatadogLogsPollerState | null {
+    const file = this.datadogLogsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateDatadogLogsState(obj)) {
+        log.warn({ file }, "datadog-logs state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn({ file, err: err.message }, "datadog-logs state read failed, treating as empty");
+      return null;
+    }
+  }
+
+  async saveDatadogLogsState(state: DatadogLogsPollerState): Promise<void> {
+    const file = this.datadogLogsStateFile({ site: state.site, query: state.query });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "datadog-logs state write failed");
+    }
+  }
+
+  jiraSearchStateFile(key: { base: string; jql: string }): string {
+    const hash = createHash("sha1")
+      .update(`${key.base}|${key.jql}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "jira-search", `${hash}.json`);
+  }
+
+  loadJiraSearchState(key: { base: string; jql: string }): JiraSearchPollerState | null {
+    const file = this.jiraSearchStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateJiraSearchState(obj)) {
+        log.warn({ file }, "jira-search state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn({ file, err: err.message }, "jira-search state read failed, treating as empty");
+      return null;
+    }
+  }
+
+  async saveJiraSearchState(state: JiraSearchPollerState): Promise<void> {
+    const file = this.jiraSearchStateFile({ base: state.base, jql: state.jql });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "jira-search state write failed");
+    }
+  }
+
+  githubWorkflowRunsStateFile(key: { repo: string }): string {
+    const hash = createHash("sha1").update(key.repo).digest("hex").slice(0, 16);
+    return join(this.baseDir, "github-workflow-runs", `${hash}.json`);
+  }
+
+  loadGithubWorkflowRunsState(key: { repo: string }): GithubWorkflowRunsPollerState | null {
+    const file = this.githubWorkflowRunsStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateGithubWorkflowRunsState(obj)) {
+        log.warn({ file }, "github-workflow-runs state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "github-workflow-runs state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveGithubWorkflowRunsState(state: GithubWorkflowRunsPollerState): Promise<void> {
+    const file = this.githubWorkflowRunsStateFile({ repo: state.repo });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn(
+        { file, err: (e as Error).message },
+        "github-workflow-runs state write failed",
+      );
+    }
+  }
+
+  sentryIssuesStateFile(key: {
+    base: string;
+    organization: string;
+    project: string;
+  }): string {
+    const hash = createHash("sha1")
+      .update(`${key.base}|${key.organization}|${key.project}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "sentry-issues", `${hash}.json`);
+  }
+
+  loadSentryIssuesState(key: {
+    base: string;
+    organization: string;
+    project: string;
+  }): SentryIssuesPollerState | null {
+    const file = this.sentryIssuesStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateSentryIssuesState(obj)) {
+        log.warn({ file }, "sentry-issues state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn(
+        { file, err: err.message },
+        "sentry-issues state read failed, treating as empty",
+      );
+      return null;
+    }
+  }
+
+  async saveSentryIssuesState(state: SentryIssuesPollerState): Promise<void> {
+    const file = this.sentryIssuesStateFile({
+      base: state.base,
+      organization: state.organization,
+      project: state.project,
+    });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "sentry-issues state write failed");
     }
   }
 
@@ -354,6 +574,88 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   const ids = o["last_event_ids"];
   if (!Array.isArray(ids)) return false;
   return ids.every((x) => typeof x === "string");
+}
+
+function validateSentryIssuesState(v: unknown): v is SentryIssuesPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o["base"] !== "string" ||
+    typeof o["organization"] !== "string" ||
+    typeof o["project"] !== "string" ||
+    typeof o["last_polled_at"] !== "string"
+  ) {
+    return false;
+  }
+  const ls = o["issue_last_seen_ms"];
+  if (typeof ls !== "object" || ls === null || Array.isArray(ls)) return false;
+  for (const value of Object.values(ls as Record<string, unknown>)) {
+    if (typeof value !== "number") return false;
+  }
+  return true;
+}
+
+function validateGithubWorkflowRunsState(v: unknown): v is GithubWorkflowRunsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o["repo"] === "string" &&
+    typeof o["last_run_id"] === "number" &&
+    typeof o["last_polled_at"] === "string"
+  );
+}
+
+function validateJiraSearchState(v: unknown): v is JiraSearchPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o["base"] !== "string" ||
+    typeof o["jql"] !== "string" ||
+    typeof o["last_updated_ms"] !== "number" ||
+    typeof o["last_polled_at"] !== "string"
+  ) {
+    return false;
+  }
+  const ks = o["last_issue_keys"];
+  if (!Array.isArray(ks)) return false;
+  return ks.every((x) => typeof x === "string");
+}
+
+function validateDatadogLogsState(v: unknown): v is DatadogLogsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o["site"] !== "string" ||
+    typeof o["query"] !== "string" ||
+    typeof o["last_event_timestamp_ms"] !== "number" ||
+    typeof o["last_polled_at"] !== "string"
+  ) {
+    return false;
+  }
+  const ids = o["last_event_ids"];
+  if (!Array.isArray(ids)) return false;
+  return ids.every((x) => typeof x === "string");
+}
+
+const AWS_CLOUDWATCH_ALARM_STATE_VALUES: readonly AwsCloudWatchAlarmState[] = [
+  "OK",
+  "ALARM",
+  "INSUFFICIENT_DATA",
+];
+
+function validateAwsCloudWatchAlarmsState(v: unknown): v is AwsCloudWatchAlarmsPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o["region"] !== "string" || typeof o["last_polled_at"] !== "string") return false;
+  const names = o["alarm_names"];
+  if (!Array.isArray(names) || !names.every((n) => typeof n === "string")) return false;
+  const states = o["alarm_states"];
+  if (typeof states !== "object" || states === null || Array.isArray(states)) return false;
+  for (const value of Object.values(states as Record<string, unknown>)) {
+    if (typeof value !== "string") return false;
+    if (!(AWS_CLOUDWATCH_ALARM_STATE_VALUES as readonly string[]).includes(value)) return false;
+  }
+  return true;
 }
 
 const DATADOG_MONITOR_STATE_VALUES: readonly DatadogMonitorState[] = [

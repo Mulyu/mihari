@@ -17,9 +17,10 @@ agent:
       {{ event.line }}
 
     関連しそうなコンテキストが必要なら CloudWatch / 他 API は使わず、event
-    の情報のみで一次要約を作って Slack に通知せよ。深追いは不要。
-  providers:
-    - slack
+    の情報のみで一次要約を作って env $SLACK_WEBHOOK_URL に通知せよ:
+      curl -fsS -X POST -H 'Content-Type: application/json' \
+        --data '{"text": "..."}' "$SLACK_WEBHOOK_URL"
+    深追いは不要。
   allowed_tools:
     - "Bash(curl:*)"
     - "Bash(jq:*)"

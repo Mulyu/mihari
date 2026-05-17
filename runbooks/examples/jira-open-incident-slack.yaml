@@ -1,0 +1,31 @@
+id: jira-open-incident-slack
+description: Jira の OPS プロジェクトに Open な incident が新規 or 更新されたら Slack に通知
+
+trigger:
+  source: jira_search
+  base: https://example.atlassian.net
+  jql: project = OPS AND issuetype = Incident AND status = Open
+  interval_sec: 120
+
+cooldown_sec: 60
+
+agent:
+  prompt: |
+    Jira の更新を観測した:
+
+      key:     {{ event.issue_key }}
+      summary: {{ event.summary }}
+      status:  {{ event.status }}
+      updated: {{ event.timestamp }}
+
+    Slack の incoming webhook に 1 行で通知せよ（誰に何を知らせるか、URL を含む）。
+    URL は {{ env.JIRA_BASE_URL }}/browse/{{ event.issue_key }} の形で組み立てる。
+
+      curl -fsS -X POST -H 'Content-Type: application/json' \
+        --data '{"text": "..."}' "$SLACK_WEBHOOK_URL"
+  allowed_tools:
+    - "Bash(curl:*)"
+    - "Bash(jq:*)"
+  permission_mode: strict
+  max_turns: 2
+  timeout_sec: 60

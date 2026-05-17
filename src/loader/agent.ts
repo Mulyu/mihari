@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { Agent, Provider } from "../types/index.js";
-import { isProvider, PROVIDERS } from "../agent/providers/index.js";
+import type { Agent } from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
 import {
   isObject,
@@ -51,7 +50,11 @@ export function validateAgent(raw: unknown, file: string, runbookFile: string): 
   const conventions =
     optionalBoolean(raw, "conventions", file, "agent.conventions") ?? false;
 
-  const providers = parseProviders(raw["providers"], file);
+  if ("providers" in raw)
+    throw new RunbookValidationError(
+      file,
+      `"agent.providers" was removed; SaaS auth and call patterns must live in agent.prompt / agent.system`,
+    );
 
   const agent: Agent = {
     prompt,
@@ -61,7 +64,6 @@ export function validateAgent(raw: unknown, file: string, runbookFile: string): 
     max_turns,
     timeout_sec,
     conventions,
-    providers,
   };
   if (system !== undefined) agent.system = system;
   if (cwd !== undefined) agent.cwd = cwd;
@@ -77,31 +79,6 @@ function parseAllowedTools(raw: unknown, file: string): string[] {
   for (const [i, v] of raw.entries()) {
     if (typeof v !== "string" || v.length === 0)
       throw new RunbookValidationError(file, `agent.allowed_tools[${i}] must be a non-empty string`);
-    out.push(v);
-  }
-  return out;
-}
-
-function parseProviders(raw: unknown, file: string): Provider[] {
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw))
-    throw new RunbookValidationError(file, "agent.providers must be an array of strings");
-  const seen = new Set<string>();
-  const out: Provider[] = [];
-  for (const [i, v] of raw.entries()) {
-    if (typeof v !== "string")
-      throw new RunbookValidationError(
-        file,
-        `agent.providers[${i}] must be a string (one of: ${PROVIDERS.join(", ")})`,
-      );
-    if (!isProvider(v))
-      throw new RunbookValidationError(
-        file,
-        `agent.providers[${i}] must be one of: ${PROVIDERS.join(", ")} (got: ${v})`,
-      );
-    if (seen.has(v))
-      throw new RunbookValidationError(file, `agent.providers contains duplicate: ${v}`);
-    seen.add(v);
     out.push(v);
   }
   return out;

@@ -9,7 +9,6 @@ export function fakeAgent(over: Partial<Agent> = {}): Agent {
     max_turns: 1,
     timeout_sec: 60,
     conventions: false,
-    providers: [],
     ...over,
   };
 }

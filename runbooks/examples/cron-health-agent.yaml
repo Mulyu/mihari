@@ -11,11 +11,11 @@ agent:
 
       1. curl -fsS --max-time 5 https://example.com/health を実行
       2. レスポンスに "status":"ok" が含まれていれば「ok」と報告して終了
-      3. 含まれていなければ Slack webhook に異常を通知（短文で十分）
+      3. 含まれていなければ env $SLACK_WEBHOOK_URL に異常を通知:
+           curl -fsS -X POST -H 'Content-Type: application/json' \
+             --data '{"text": "..."}' "$SLACK_WEBHOOK_URL"
 
     余計な調査はしない。1 ターンで完結すること。
-  providers:
-    - slack
   allowed_tools:
     - "Bash(curl:*)"
     - "Bash(jq:*)"

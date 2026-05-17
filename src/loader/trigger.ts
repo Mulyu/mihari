@@ -1,7 +1,27 @@
 import { Cron } from "croner";
-import type { DatadogMonitorState, Trigger } from "../types/index.js";
+import type {
+  AwsCloudWatchAlarmState,
+  DatadogMonitorState,
+  SentryIssueLevel,
+  Trigger,
+} from "../types/index.js";
 import { RunbookValidationError } from "./error.js";
 import { isObject, mustString, optionalNumber, optionalString } from "./primitives.js";
+
+const AWS_CLOUDWATCH_ALARM_STATES: readonly AwsCloudWatchAlarmState[] = [
+  "OK",
+  "ALARM",
+  "INSUFFICIENT_DATA",
+];
+
+const SENTRY_ISSUE_LEVELS: readonly SentryIssueLevel[] = [
+  "fatal",
+  "error",
+  "warning",
+  "info",
+  "debug",
+  "sample",
+];
 
 const DATADOG_MONITOR_STATES: readonly DatadogMonitorState[] = [
   "alert",
@@ -74,6 +94,26 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     if (pattern !== undefined) t.pattern = pattern;
     return t;
   }
+  if (source === "aws_cloudwatch_alarms") {
+    const region = mustString(raw, "region", file, "trigger.region");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const alarm_names = parseStringArray(raw, "alarm_names", file, "trigger.alarm_names");
+    const transitions = parseAwsCloudWatchAlarmTransitions(raw, file);
+    const t: Trigger = {
+      source: "aws_cloudwatch_alarms",
+      region,
+      transitions,
+      interval_sec,
+    };
+    if (alarm_names !== undefined) t.alarm_names = alarm_names;
+    return t;
+  }
   if (source === "datadog_monitors") {
     const site = mustString(raw, "site", file, "trigger.site");
     const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
@@ -94,10 +134,189 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
     if (monitor_tags !== undefined) t.monitor_tags = monitor_tags;
     return t;
   }
+  if (source === "datadog_logs") {
+    const site = mustString(raw, "site", file, "trigger.site");
+    const query = mustString(raw, "query", file, "trigger.query");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    return {
+      source: "datadog_logs",
+      site,
+      query,
+      interval_sec,
+    };
+  }
+  if (source === "jira_search") {
+    const base = mustString(raw, "base", file, "trigger.base");
+    if (!/^https?:\/\//.test(base))
+      throw new RunbookValidationError(file, "trigger.base must be a http(s) URL");
+    const jql = mustString(raw, "jql", file, "trigger.jql");
+    if (/order\s+by/i.test(jql))
+      throw new RunbookValidationError(
+        file,
+        'trigger.jql must not include "ORDER BY" (the poller orders by updated)',
+      );
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    return {
+      source: "jira_search",
+      base: base.replace(/\/+$/, ""),
+      jql,
+      interval_sec,
+    };
+  }
+  if (source === "github_workflow_runs") {
+    const repo = mustString(raw, "repo", file, "trigger.repo");
+    if (!/^[^/\s]+\/[^/\s]+$/.test(repo))
+      throw new RunbookValidationError(file, 'trigger.repo must be "owner/repo"');
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const branch = optionalString(raw, "branch", file, "trigger.branch");
+    const workflows = parseStringArray(raw, "workflows", file, "trigger.workflows");
+    const conclusions = parseGithubConclusions(raw, file);
+    const t: Trigger = {
+      source: "github_workflow_runs",
+      repo,
+      conclusions,
+      interval_sec,
+    };
+    if (branch !== undefined) t.branch = branch;
+    if (workflows !== undefined) t.workflows = workflows;
+    return t;
+  }
+  if (source === "sentry_issues") {
+    const base = mustString(raw, "base", file, "trigger.base");
+    if (!/^https?:\/\//.test(base))
+      throw new RunbookValidationError(file, "trigger.base must be a http(s) URL");
+    const organization = mustString(raw, "organization", file, "trigger.organization");
+    const project = mustString(raw, "project", file, "trigger.project");
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    const levels = parseSentryLevels(raw, file);
+    return {
+      source: "sentry_issues",
+      base: base.replace(/\/+$/, ""),
+      organization,
+      project,
+      levels,
+      interval_sec,
+    };
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", or "datadog_monitors" (got: ${source})`,
+    `trigger.source must be one of: file, cron, aws_cloudwatch_logs, aws_cloudwatch_alarms, datadog_monitors, datadog_logs, jira_search, github_workflow_runs, sentry_issues (got: ${source})`,
   );
+}
+
+function parseSentryLevels(raw: Record<string, unknown>, file: string): SentryIssueLevel[] {
+  const v = raw["levels"];
+  if (v === undefined) return ["error", "fatal"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.levels must be a non-empty array of level literals",
+    );
+  }
+  const out: SentryIssueLevel[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !isSentryLevel(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.levels entries must be one of: ${SENTRY_ISSUE_LEVELS.join(", ")} (got: ${String(item)})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function isSentryLevel(s: string): s is SentryIssueLevel {
+  return (SENTRY_ISSUE_LEVELS as readonly string[]).includes(s);
+}
+
+// GitHub の conclusion 文字列は API 仕様そのまま小文字で扱う（success / failure / cancelled /
+// skipped / timed_out / action_required / neutral / startup_failure / stale）。
+const GITHUB_CONCLUSIONS: readonly string[] = [
+  "success",
+  "failure",
+  "cancelled",
+  "skipped",
+  "timed_out",
+  "action_required",
+  "neutral",
+  "startup_failure",
+  "stale",
+];
+
+function parseGithubConclusions(raw: Record<string, unknown>, file: string): string[] {
+  const v = raw["conclusions"];
+  if (v === undefined) return ["failure"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.conclusions must be a non-empty array of conclusion literals",
+    );
+  }
+  const out: string[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !GITHUB_CONCLUSIONS.includes(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.conclusions entries must be one of: ${GITHUB_CONCLUSIONS.join(", ")} (got: ${String(item)})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function parseAwsCloudWatchAlarmTransitions(
+  raw: Record<string, unknown>,
+  file: string,
+): AwsCloudWatchAlarmState[] {
+  const v = raw["transitions"];
+  if (v === undefined) return ["ALARM"];
+  if (!Array.isArray(v) || v.length === 0) {
+    throw new RunbookValidationError(
+      file,
+      "trigger.transitions must be a non-empty array of state literals",
+    );
+  }
+  const out: AwsCloudWatchAlarmState[] = [];
+  for (const item of v) {
+    if (typeof item !== "string" || !isAwsCloudWatchAlarmState(item)) {
+      throw new RunbookValidationError(
+        file,
+        `trigger.transitions entries must be one of: ${AWS_CLOUDWATCH_ALARM_STATES.join(", ")} (got: ${String(item)})`,
+      );
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function isAwsCloudWatchAlarmState(s: string): s is AwsCloudWatchAlarmState {
+  return (AWS_CLOUDWATCH_ALARM_STATES as readonly string[]).includes(s);
 }
 
 function parseStringArray(

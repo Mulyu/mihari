@@ -21,12 +21,36 @@ import {
   uniqueAwsCloudWatchLogsTriggers,
 } from "../triggers/aws-cloudwatch-logs.js";
 import {
+  AwsCloudWatchAlarmsPoller,
+  createAwsCloudWatchAlarmsApiFactory,
+  uniqueAwsCloudWatchAlarmsTriggers,
+} from "../triggers/aws-cloudwatch-alarms.js";
+import {
   DatadogMonitorsPoller,
   createDatadogMonitorsApiFactory,
   uniqueDatadogMonitorsTriggers,
 } from "../triggers/datadog-monitors.js";
-import { missingEnv } from "../agent/providers/index.js";
-import type { Provider, Runbook, Trigger, TriggerEvent } from "../types/index.js";
+import {
+  DatadogLogsPoller,
+  createDatadogLogsApiFactory,
+  uniqueDatadogLogsTriggers,
+} from "../triggers/datadog-logs.js";
+import {
+  JiraSearchPoller,
+  createJiraSearchApiFactory,
+  uniqueJiraSearchTriggers,
+} from "../triggers/jira-search.js";
+import {
+  GithubWorkflowRunsPoller,
+  createGithubWorkflowRunsApiFactory,
+  uniqueGithubWorkflowRunsTriggers,
+} from "../triggers/github-workflow-runs.js";
+import {
+  SentryIssuesPoller,
+  createSentryIssuesApiFactory,
+  uniqueSentryIssuesTriggers,
+} from "../triggers/sentry-issues.js";
+import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
 
@@ -230,7 +254,12 @@ interface Ctx {
   pollers: FilePoller[];
   cronSchedulers: CronScheduler[];
   awsCloudWatchLogsPollers: AwsCloudWatchLogsPoller[];
+  awsCloudWatchAlarmsPollers: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers: DatadogMonitorsPoller[];
+  datadogLogsPollers: DatadogLogsPoller[];
+  jiraSearchPollers: JiraSearchPoller[];
+  githubWorkflowRunsPollers: GithubWorkflowRunsPoller[];
+  sentryIssuesPollers: SentryIssuesPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
@@ -238,6 +267,26 @@ function triggerSummary(t: Trigger): string {
   if (t.source === "cron") return `cron:${t.schedule}`;
   if (t.source === "aws_cloudwatch_logs") {
     return `aws_cloudwatch_logs:${t.region}/${t.log_group}`;
+  }
+  if (t.source === "aws_cloudwatch_alarms") {
+    const names = (t.alarm_names ?? []).join(",");
+    return `aws_cloudwatch_alarms:${t.region}|${names}`;
+  }
+  if (t.source === "datadog_logs") {
+    return `datadog_logs:${t.site}|${t.query}`;
+  }
+  if (t.source === "jira_search") {
+    return `jira_search:${t.base}|${t.jql}`;
+  }
+  if (t.source === "github_workflow_runs") {
+    const parts = [t.repo];
+    if (t.branch !== undefined) parts.push(`branch=${t.branch}`);
+    if (t.workflows !== undefined && t.workflows.length > 0)
+      parts.push(`workflows=${t.workflows.join(",")}`);
+    return `github_workflow_runs:${parts.join("|")}`;
+  }
+  if (t.source === "sentry_issues") {
+    return `sentry_issues:${t.organization}/${t.project}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -259,13 +308,6 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
   } else {
     log.warn({ runbooksDir }, "runbook directory not found, continuing with no runbooks");
   }
-  const declaredProviders = uniqueProviders(runbooks);
-  for (const m of missingEnv(declaredProviders, process.env)) {
-    log.warn(
-      { provider: m.provider, missing: m.vars },
-      "provider env missing; agent calls to this provider will likely fail",
-    );
-  }
 
   const state = new StateStore({ baseDir: opts.stateDir });
   const executor = createExecutor(state);
@@ -280,6 +322,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
       awsCloudWatchLogsPollers.push(
         new AwsCloudWatchLogsPoller(
           { region: g.region, logGroup: g.logGroup },
+          g.intervalSec,
+          state,
+          factory.forRegion(g.region),
+        ),
+      );
+    }
+  }
+
+  const alarmGroups = uniqueAwsCloudWatchAlarmsTriggers(runbooks);
+  const awsCloudWatchAlarmsPollers: AwsCloudWatchAlarmsPoller[] = [];
+  if (alarmGroups.length > 0) {
+    const factory = await createAwsCloudWatchAlarmsApiFactory();
+    for (const g of alarmGroups) {
+      awsCloudWatchAlarmsPollers.push(
+        new AwsCloudWatchAlarmsPoller(
+          { region: g.region, alarmNames: g.alarmNames },
           g.intervalSec,
           state,
           factory.forRegion(g.region),
@@ -304,6 +362,70 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const ddLogsGroups = uniqueDatadogLogsTriggers(runbooks);
+  const datadogLogsPollers: DatadogLogsPoller[] = [];
+  if (ddLogsGroups.length > 0) {
+    const factory = await createDatadogLogsApiFactory();
+    for (const g of ddLogsGroups) {
+      datadogLogsPollers.push(
+        new DatadogLogsPoller(
+          { site: g.site, query: g.query },
+          g.intervalSec,
+          state,
+          factory.forSite(g.site),
+        ),
+      );
+    }
+  }
+
+  const jiraGroups = uniqueJiraSearchTriggers(runbooks);
+  const jiraSearchPollers: JiraSearchPoller[] = [];
+  if (jiraGroups.length > 0) {
+    const factory = await createJiraSearchApiFactory();
+    for (const g of jiraGroups) {
+      jiraSearchPollers.push(
+        new JiraSearchPoller(
+          { base: g.base, jql: g.jql },
+          g.intervalSec,
+          state,
+          factory.forBase(g.base),
+        ),
+      );
+    }
+  }
+
+  const ghGroups = uniqueGithubWorkflowRunsTriggers(runbooks);
+  const githubWorkflowRunsPollers: GithubWorkflowRunsPoller[] = [];
+  if (ghGroups.length > 0) {
+    const factory = await createGithubWorkflowRunsApiFactory();
+    for (const g of ghGroups) {
+      githubWorkflowRunsPollers.push(
+        new GithubWorkflowRunsPoller(
+          { repo: g.repo },
+          g.intervalSec,
+          state,
+          factory.forRepo(g.repo),
+        ),
+      );
+    }
+  }
+
+  const sentryGroups = uniqueSentryIssuesTriggers(runbooks);
+  const sentryIssuesPollers: SentryIssuesPoller[] = [];
+  if (sentryGroups.length > 0) {
+    const factory = await createSentryIssuesApiFactory();
+    for (const g of sentryGroups) {
+      sentryIssuesPollers.push(
+        new SentryIssuesPoller(
+          { base: g.base, organization: g.organization, project: g.project },
+          g.intervalSec,
+          state,
+          factory.forBase(g.base),
+        ),
+      );
+    }
+  }
+
   return {
     runbooks,
     state,
@@ -311,16 +433,13 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     pollers,
     cronSchedulers,
     awsCloudWatchLogsPollers,
+    awsCloudWatchAlarmsPollers,
     datadogMonitorsPollers,
+    datadogLogsPollers,
+    jiraSearchPollers,
+    githubWorkflowRunsPollers,
+    sentryIssuesPollers,
   };
-}
-
-function uniqueProviders(runbooks: Runbook[]): Provider[] {
-  const set = new Set<Provider>();
-  for (const rb of runbooks) {
-    for (const p of rb.agent.providers) set.add(p);
-  }
-  return [...set];
 }
 
 function sleep(ms: number): Promise<void> {

@@ -1,6 +1,5 @@
 import { logger } from "../lib/logger.js";
 import type { Agent, AgentContext, AgentResult } from "../types/index.js";
-import { composePreambles } from "./providers/index.js";
 import { captureStdout, substituteTemplate } from "./template.js";
 
 const log = logger("agent");
@@ -56,7 +55,6 @@ export function matchesAllowedTools(
 export function composeSystemPrompt(agent: Agent, userSystem: string | undefined): string | undefined {
   const parts: string[] = [];
   if (agent.conventions) parts.push(CONVENTIONS_PREAMBLE);
-  if (agent.providers.length > 0) parts.push(composePreambles(agent.providers));
   if (userSystem !== undefined) parts.push(userSystem);
   if (parts.length === 0) return undefined;
   return parts.join("\n\n---\n\n");

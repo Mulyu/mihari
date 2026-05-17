@@ -23,9 +23,23 @@ agent:
       重複起票を避けるため、起票前に MIHARI_IDEMPOTENCY_KEY で既存検索すること。
     - to_state が ok の場合: 当該 monitor に紐づく未クローズの Jira を検索して
       クローズする。
-  providers:
-    - datadog
-    - jira
+
+    認証:
+      - Datadog: env $DD_API_KEY / $DD_APP_KEY を `DD-API-KEY` / `DD-APPLICATION-KEY`
+        ヘッダで送る。site は $DD_SITE（既定 datadoghq.com）。
+      - Jira: env $JIRA_BASE / $JIRA_USER / $JIRA_TOKEN を curl の -u で basic 認証。
+
+    Datadog endpoints:
+      - GET https://api.$DD_SITE/api/v1/monitor/{monitor_id}
+      - GET https://api.$DD_SITE/api/v1/events?start=...&end=...
+
+    Jira endpoints:
+      - GET  /rest/api/3/search?jql=...
+      - POST /rest/api/3/issue
+      - POST /rest/api/3/issue/{key}/transitions
+
+    冪等性: Jira issue summary または label に $MIHARI_IDEMPOTENCY_KEY を含め、
+    起票前に `jql=summary ~ "$MIHARI_IDEMPOTENCY_KEY"` で重複検出する。
   allowed_tools:
     - "Bash(curl:*)"
     - "Bash(jq:*)"

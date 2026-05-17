@@ -1,16 +1,26 @@
 import { resolve } from "node:path";
 import type {
+  AwsCloudWatchAlarmsTrigger,
   AwsCloudWatchLogsTrigger,
+  DatadogLogsTrigger,
   DatadogMonitorsTrigger,
   FileTrigger,
+  GithubWorkflowRunsTrigger,
+  JiraSearchTrigger,
   Match,
   Runbook,
+  SentryIssuesTrigger,
   TriggerEvent,
 } from "../types/index.js";
 
 type FileRunbook = Runbook & { trigger: FileTrigger };
 type AwsCloudWatchLogsRunbook = Runbook & { trigger: AwsCloudWatchLogsTrigger };
+type AwsCloudWatchAlarmsRunbook = Runbook & { trigger: AwsCloudWatchAlarmsTrigger };
 type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };
+type DatadogLogsRunbook = Runbook & { trigger: DatadogLogsTrigger };
+type JiraSearchRunbook = Runbook & { trigger: JiraSearchTrigger };
+type GithubWorkflowRunsRunbook = Runbook & { trigger: GithubWorkflowRunsTrigger };
+type SentryIssuesRunbook = Runbook & { trigger: SentryIssuesTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
@@ -20,8 +30,28 @@ function isAwsCloudWatchLogsRunbook(rb: Runbook): rb is AwsCloudWatchLogsRunbook
   return rb.trigger.source === "aws_cloudwatch_logs";
 }
 
+function isAwsCloudWatchAlarmsRunbook(rb: Runbook): rb is AwsCloudWatchAlarmsRunbook {
+  return rb.trigger.source === "aws_cloudwatch_alarms";
+}
+
 function isDatadogMonitorsRunbook(rb: Runbook): rb is DatadogMonitorsRunbook {
   return rb.trigger.source === "datadog_monitors";
+}
+
+function isDatadogLogsRunbook(rb: Runbook): rb is DatadogLogsRunbook {
+  return rb.trigger.source === "datadog_logs";
+}
+
+function isJiraSearchRunbook(rb: Runbook): rb is JiraSearchRunbook {
+  return rb.trigger.source === "jira_search";
+}
+
+function isGithubWorkflowRunsRunbook(rb: Runbook): rb is GithubWorkflowRunsRunbook {
+  return rb.trigger.source === "github_workflow_runs";
+}
+
+function isSentryIssuesRunbook(rb: Runbook): rb is SentryIssuesRunbook {
+  return rb.trigger.source === "sentry_issues";
 }
 
 export function match(
@@ -53,6 +83,25 @@ export function matchAwsCloudWatchLogs(
     .map((r) => ({ runbook: r, event }));
 }
 
+// CloudWatch Alarm の状態遷移は poller が全件 emit する。runbook 側は
+// `(region, alarm_names)` の購読キーが一致し、かつ `transitions` に到達状態が
+// 含まれる場合に発火する（datadog_monitors と同じパターン）。
+export function matchAwsCloudWatchAlarm(
+  event: Extract<TriggerEvent, { type: "aws_cloudwatch_alarm" }>,
+  runbooks: Runbook[],
+): Match[] {
+  const eventNames = [...event.alarm_names].sort().join(",");
+  return runbooks
+    .filter(isAwsCloudWatchAlarmsRunbook)
+    .filter((r) => {
+      if (r.trigger.region !== event.region) return false;
+      const triggerNames = [...(r.trigger.alarm_names ?? [])].sort().join(",");
+      if (triggerNames !== eventNames) return false;
+      return r.trigger.transitions.includes(event.to_state);
+    })
+    .map((r) => ({ runbook: r, event }));
+}
+
 // Datadog Monitor の状態遷移は poller が全件 emit する。runbook 側は
 // `(site, monitor_tags)` の購読キーが一致し、かつ `transitions` に到達状態が
 // 含まれる場合に発火する。同じ key を異なる transitions で複数 runbook が購読
@@ -70,6 +119,69 @@ export function matchDatadogMonitor(
       if (triggerTags !== eventTags) return false;
       return r.trigger.transitions.includes(event.to_state);
     })
+    .map((r) => ({ runbook: r, event }));
+}
+
+export function matchDatadogLog(
+  event: Extract<TriggerEvent, { type: "datadog_log" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isDatadogLogsRunbook)
+    .filter((r) => r.trigger.site === event.site && r.trigger.query === event.query)
+    .map((r) => ({ runbook: r, event }));
+}
+
+export function matchJiraIssue(
+  event: Extract<TriggerEvent, { type: "jira_issue" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isJiraSearchRunbook)
+    .filter((r) => r.trigger.base === event.base && r.trigger.jql === event.jql)
+    .map((r) => ({ runbook: r, event }));
+}
+
+// repo 単位で 1 つの poller が走り、branch / workflows / conclusions のフィルタは
+// matcher 側で各 runbook ごとに適用する。
+export function matchGithubWorkflowRun(
+  event: Extract<TriggerEvent, { type: "github_workflow_run" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isGithubWorkflowRunsRunbook)
+    .filter((r) => {
+      if (r.trigger.repo !== event.repo) return false;
+      if (r.trigger.branch !== undefined && r.trigger.branch !== event.branch) return false;
+      if (r.trigger.workflows !== undefined && r.trigger.workflows.length > 0) {
+        const slug = event.workflow_path.replace(/^\.github\/workflows\//, "");
+        if (
+          !r.trigger.workflows.includes(event.workflow_path) &&
+          !r.trigger.workflows.includes(slug) &&
+          !r.trigger.workflows.includes(event.workflow_name)
+        ) {
+          return false;
+        }
+      }
+      return r.trigger.conclusions.includes(event.conclusion);
+    })
+    .map((r) => ({ runbook: r, event }));
+}
+
+// (base, organization, project) で 1 つの poller が走り、levels フィルタは matcher で適用。
+export function matchSentryIssue(
+  event: Extract<TriggerEvent, { type: "sentry_issue" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isSentryIssuesRunbook)
+    .filter(
+      (r) =>
+        r.trigger.base === event.base &&
+        r.trigger.organization === event.organization &&
+        r.trigger.project === event.project &&
+        r.trigger.levels.includes(event.level),
+    )
     .map((r) => ({ runbook: r, event }));
 }
 

@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   match,
+  matchAwsCloudWatchAlarm,
   matchAwsCloudWatchLogs,
+  matchDatadogLog,
   matchDatadogMonitor,
+  matchGithubWorkflowRun,
+  matchJiraIssue,
+  matchSentryIssue,
   uniqueTriggerPaths,
 } from "../src/engine/matcher.js";
-import type { DatadogMonitorState, Runbook, TriggerEvent } from "../src/types/index.js";
+import type {
+  AwsCloudWatchAlarmState,
+  DatadogMonitorState,
+  Runbook,
+  SentryIssueLevel,
+  TriggerEvent,
+} from "../src/types/index.js";
 import { fakeAgent } from "./_fixtures.js";
 
 function fileRb(id: string, path: string, pattern: RegExp): Runbook {
@@ -232,6 +243,446 @@ describe("matchDatadogMonitor", () => {
     ];
     const m = matchDatadogMonitor(ddEvent("datadoghq.com", ["env:prod"], "ok", "alert"), rbs);
     expect(m.map((x) => x.runbook.id)).toEqual(["d"]);
+  });
+});
+
+function cwAlarmRb(
+  id: string,
+  region: string,
+  alarmNames: string[] | undefined,
+  transitions: AwsCloudWatchAlarmState[],
+): Runbook {
+  const trigger: Runbook["trigger"] = {
+    source: "aws_cloudwatch_alarms",
+    region,
+    transitions,
+    interval_sec: 60,
+  };
+  if (alarmNames !== undefined) trigger.alarm_names = alarmNames;
+  return {
+    id,
+    trigger,
+    agent: fakeAgent(),
+    sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function cwAlarmEvent(
+  region: string,
+  alarmNames: string[],
+  fromState: AwsCloudWatchAlarmState,
+  toState: AwsCloudWatchAlarmState,
+): Extract<TriggerEvent, { type: "aws_cloudwatch_alarm" }> {
+  return {
+    type: "aws_cloudwatch_alarm",
+    region,
+    alarm_names: alarmNames,
+    alarm_name: alarmNames[0] ?? "a1",
+    alarm_arn: "arn:aws:cloudwatch:us-east-1:123:alarm:a1",
+    from_state: fromState,
+    to_state: toState,
+    timestamp: "2026-05-09T12:00:00Z",
+  };
+}
+
+describe("matchAwsCloudWatchAlarm", () => {
+  it("matches when region, sorted alarm_names, and to_state ∈ transitions align", () => {
+    const rbs = [cwAlarmRb("a", "us-east-1", ["db-cpu"], ["ALARM"])];
+    const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", ["db-cpu"], "OK", "ALARM"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose region differs", () => {
+    const rbs = [
+      cwAlarmRb("a", "us-east-1", ["db-cpu"], ["ALARM"]),
+      cwAlarmRb("b", "us-west-2", ["db-cpu"], ["ALARM"]),
+    ];
+    const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", ["db-cpu"], "OK", "ALARM"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("treats alarm_names ordering as irrelevant", () => {
+    const rbs = [cwAlarmRb("a", "us-east-1", ["b", "a"], ["ALARM"])];
+    const m = matchAwsCloudWatchAlarm(
+      cwAlarmEvent("us-east-1", ["a", "b"], "OK", "ALARM"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("treats undefined and [] alarm_names as the same key", () => {
+    const rbs = [cwAlarmRb("a", "us-east-1", undefined, ["ALARM"])];
+    const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", [], "OK", "ALARM"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose transitions do not include to_state", () => {
+    const rbs = [
+      cwAlarmRb("a", "us-east-1", ["db-cpu"], ["OK"]),
+      cwAlarmRb("b", "us-east-1", ["db-cpu"], ["ALARM"]),
+    ];
+    const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", ["db-cpu"], "OK", "ALARM"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["b"]);
+  });
+
+  it("ignores other trigger sources", () => {
+    const rbs: Runbook[] = [
+      fileRb("f", "/var/log/x", /./),
+      cronRb("c", "* * * * *"),
+      cwAlarmRb("a", "us-east-1", ["db-cpu"], ["ALARM"]),
+    ];
+    const m = matchAwsCloudWatchAlarm(cwAlarmEvent("us-east-1", ["db-cpu"], "OK", "ALARM"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+});
+
+function ddLogRb(id: string, site: string, query: string): Runbook {
+  return {
+    id,
+    trigger: { source: "datadog_logs", site, query, interval_sec: 60 },
+    agent: fakeAgent(),
+    sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function ddLogEvent(
+  site: string,
+  query: string,
+): Extract<TriggerEvent, { type: "datadog_log" }> {
+  return {
+    type: "datadog_log",
+    site,
+    query,
+    log_id: "log1",
+    service: "svc",
+    host: "h1",
+    message: "boom",
+    timestamp: "2026-05-09T12:00:00Z",
+    timestamp_ms: 0,
+  };
+}
+
+describe("matchDatadogLog", () => {
+  it("matches by site + query exactly", () => {
+    const rbs = [ddLogRb("a", "datadoghq.com", "service:web status:error")];
+    const m = matchDatadogLog(ddLogEvent("datadoghq.com", "service:web status:error"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose site differs", () => {
+    const rbs = [
+      ddLogRb("a", "datadoghq.com", "service:web"),
+      ddLogRb("b", "datadoghq.eu", "service:web"),
+    ];
+    const m = matchDatadogLog(ddLogEvent("datadoghq.com", "service:web"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose query differs", () => {
+    const rbs = [
+      ddLogRb("a", "datadoghq.com", "service:web"),
+      ddLogRb("b", "datadoghq.com", "service:api"),
+    ];
+    const m = matchDatadogLog(ddLogEvent("datadoghq.com", "service:web"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("ignores other trigger sources", () => {
+    const rbs: Runbook[] = [
+      fileRb("f", "/var/log/x", /./),
+      cwRb("w", "us-east-1", "/g"),
+      ddLogRb("a", "datadoghq.com", "service:web"),
+    ];
+    const m = matchDatadogLog(ddLogEvent("datadoghq.com", "service:web"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+});
+
+function jiraRb(id: string, base: string, jql: string): Runbook {
+  return {
+    id,
+    trigger: { source: "jira_search", base, jql, interval_sec: 60 },
+    agent: fakeAgent(),
+    sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function jiraEvent(
+  base: string,
+  jql: string,
+): Extract<TriggerEvent, { type: "jira_issue" }> {
+  return {
+    type: "jira_issue",
+    base,
+    jql,
+    issue_key: "PROJ-1",
+    summary: "x",
+    status: "Open",
+    updated: "2026-05-09T12:00:00Z",
+    updated_ms: 0,
+    timestamp: "2026-05-09T12:00:00Z",
+  };
+}
+
+describe("matchJiraIssue", () => {
+  it("matches by base + jql exactly", () => {
+    const rbs = [jiraRb("a", "https://x.atlassian.net", "project = PROJ")];
+    const m = matchJiraIssue(jiraEvent("https://x.atlassian.net", "project = PROJ"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose base differs", () => {
+    const rbs = [
+      jiraRb("a", "https://x.atlassian.net", "project = PROJ"),
+      jiraRb("b", "https://y.atlassian.net", "project = PROJ"),
+    ];
+    const m = matchJiraIssue(jiraEvent("https://x.atlassian.net", "project = PROJ"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose jql differs (string equality, no normalization)", () => {
+    const rbs = [
+      jiraRb("a", "https://x.atlassian.net", "project = PROJ"),
+      jiraRb("b", "https://x.atlassian.net", "project=PROJ"),
+    ];
+    const m = matchJiraIssue(jiraEvent("https://x.atlassian.net", "project = PROJ"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("ignores other trigger sources", () => {
+    const rbs: Runbook[] = [
+      cronRb("c", "* * * * *"),
+      jiraRb("a", "https://x.atlassian.net", "project = PROJ"),
+    ];
+    const m = matchJiraIssue(jiraEvent("https://x.atlassian.net", "project = PROJ"), rbs);
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+});
+
+function ghRb(
+  id: string,
+  repo: string,
+  conclusions: string[],
+  branch?: string,
+  workflows?: string[],
+): Runbook {
+  const trigger: Runbook["trigger"] = {
+    source: "github_workflow_runs",
+    repo,
+    conclusions,
+    interval_sec: 60,
+  };
+  if (branch !== undefined) trigger.branch = branch;
+  if (workflows !== undefined) trigger.workflows = workflows;
+  return {
+    id,
+    trigger,
+    agent: fakeAgent(),
+    sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function ghEvent(
+  repo: string,
+  branch: string,
+  workflowName: string,
+  workflowPath: string,
+  conclusion: string,
+): Extract<TriggerEvent, { type: "github_workflow_run" }> {
+  return {
+    type: "github_workflow_run",
+    repo,
+    run_id: 1,
+    run_number: 1,
+    workflow_name: workflowName,
+    workflow_path: workflowPath,
+    branch,
+    conclusion,
+    status: "completed",
+    html_url: "https://github.com/x/y/actions/runs/1",
+    timestamp: "2026-05-09T12:00:00Z",
+  };
+}
+
+describe("matchGithubWorkflowRun", () => {
+  it("matches when repo + conclusion align (branch / workflows unset)", () => {
+    const rbs = [ghRb("a", "owner/repo", ["failure"])];
+    const m = matchGithubWorkflowRun(
+      ghEvent("owner/repo", "main", "CI", ".github/workflows/ci.yml", "failure"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose repo differs", () => {
+    const rbs = [
+      ghRb("a", "owner/repo", ["failure"]),
+      ghRb("b", "owner/other", ["failure"]),
+    ];
+    const m = matchGithubWorkflowRun(
+      ghEvent("owner/repo", "main", "CI", ".github/workflows/ci.yml", "failure"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose branch differs (when set)", () => {
+    const rbs = [
+      ghRb("a", "owner/repo", ["failure"], "main"),
+      ghRb("b", "owner/repo", ["failure"], "develop"),
+    ];
+    const m = matchGithubWorkflowRun(
+      ghEvent("owner/repo", "main", "CI", ".github/workflows/ci.yml", "failure"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("matches workflows by full path, slug, or display name", () => {
+    const byPath = ghRb("p", "owner/repo", ["failure"], undefined, [
+      ".github/workflows/ci.yml",
+    ]);
+    const bySlug = ghRb("s", "owner/repo", ["failure"], undefined, ["ci.yml"]);
+    const byName = ghRb("n", "owner/repo", ["failure"], undefined, ["CI"]);
+    const noMatch = ghRb("x", "owner/repo", ["failure"], undefined, ["release.yml"]);
+    const rbs = [byPath, bySlug, byName, noMatch];
+    const m = matchGithubWorkflowRun(
+      ghEvent("owner/repo", "main", "CI", ".github/workflows/ci.yml", "failure"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id).sort()).toEqual(["n", "p", "s"]);
+  });
+
+  it("filters out runbooks whose conclusions do not include event.conclusion", () => {
+    const rbs = [
+      ghRb("a", "owner/repo", ["success"]),
+      ghRb("b", "owner/repo", ["failure"]),
+    ];
+    const m = matchGithubWorkflowRun(
+      ghEvent("owner/repo", "main", "CI", ".github/workflows/ci.yml", "failure"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["b"]);
+  });
+
+  it("ignores other trigger sources", () => {
+    const rbs: Runbook[] = [
+      fileRb("f", "/var/log/x", /./),
+      ghRb("a", "owner/repo", ["failure"]),
+    ];
+    const m = matchGithubWorkflowRun(
+      ghEvent("owner/repo", "main", "CI", ".github/workflows/ci.yml", "failure"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+});
+
+function sentryRb(
+  id: string,
+  base: string,
+  organization: string,
+  project: string,
+  levels: SentryIssueLevel[],
+): Runbook {
+  return {
+    id,
+    trigger: {
+      source: "sentry_issues",
+      base,
+      organization,
+      project,
+      levels,
+      interval_sec: 60,
+    },
+    agent: fakeAgent(),
+    sourcePath: `/tmp/${id}.yaml`,
+  };
+}
+
+function sentryEvent(
+  base: string,
+  organization: string,
+  project: string,
+  level: SentryIssueLevel,
+  isNew = true,
+): Extract<TriggerEvent, { type: "sentry_issue" }> {
+  return {
+    type: "sentry_issue",
+    base,
+    organization,
+    project,
+    issue_id: "1",
+    short_id: "PROJ-1",
+    title: "x",
+    level,
+    status: "unresolved",
+    permalink: "https://sentry.example/issues/1/",
+    first_seen: "2026-05-09T11:00:00Z",
+    last_seen: "2026-05-09T12:00:00Z",
+    is_new: isNew,
+    timestamp: "2026-05-09T12:00:00Z",
+  };
+}
+
+describe("matchSentryIssue", () => {
+  it("matches when base + org + project + level all align", () => {
+    const rbs = [
+      sentryRb("a", "https://sentry.example", "org1", "p1", ["error", "fatal"]),
+    ];
+    const m = matchSentryIssue(
+      sentryEvent("https://sentry.example", "org1", "p1", "error"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose organization differs", () => {
+    const rbs = [
+      sentryRb("a", "https://sentry.example", "org1", "p1", ["error"]),
+      sentryRb("b", "https://sentry.example", "org2", "p1", ["error"]),
+    ];
+    const m = matchSentryIssue(
+      sentryEvent("https://sentry.example", "org1", "p1", "error"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose project differs", () => {
+    const rbs = [
+      sentryRb("a", "https://sentry.example", "org1", "p1", ["error"]),
+      sentryRb("b", "https://sentry.example", "org1", "p2", ["error"]),
+    ];
+    const m = matchSentryIssue(
+      sentryEvent("https://sentry.example", "org1", "p1", "error"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
+  });
+
+  it("filters out runbooks whose levels do not include event.level", () => {
+    const rbs = [
+      sentryRb("a", "https://sentry.example", "org1", "p1", ["warning"]),
+      sentryRb("b", "https://sentry.example", "org1", "p1", ["error", "fatal"]),
+    ];
+    const m = matchSentryIssue(
+      sentryEvent("https://sentry.example", "org1", "p1", "error"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["b"]);
+  });
+
+  it("ignores other trigger sources", () => {
+    const rbs: Runbook[] = [
+      cronRb("c", "* * * * *"),
+      sentryRb("a", "https://sentry.example", "org1", "p1", ["error"]),
+    ];
+    const m = matchSentryIssue(
+      sentryEvent("https://sentry.example", "org1", "p1", "error"),
+      rbs,
+    );
+    expect(m.map((x) => x.runbook.id)).toEqual(["a"]);
   });
 });
 

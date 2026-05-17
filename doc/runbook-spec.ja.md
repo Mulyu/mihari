@@ -139,27 +139,9 @@ trigger:
 
 認証は環境変数 `JIRA_USER` / `JIRA_TOKEN` から basic 認証を組む。SDK は使わず Node 標準の global fetch を使う（動的 import なし）。同じ `(base, jql)` を購読する複数ランブックは 1 つのポーラーを共有する。
 
-カーソルは Jira issue の `updated` を ms 値で保持し、同 ms に並ぶ issue_key を境界 dedup 用に保持する。`updated >=` の JQL 比較は分粒度なので、分境界に丸めた時刻をフィルタに使う。1 tick の startAt ページング cap は 50。
+API エンドポイントは Jira Cloud の `/rest/api/3/search/jql` を `POST` で叩く。旧 `/rest/api/3/search` は Jira Cloud で廃止されたため使わない。ページングは `nextPageToken` トークンベース（cap 50 hop）。
 
-### `gcp_cloud_logging`
-
-```yaml
-trigger:
-  source: gcp_cloud_logging
-  project_id: my-project
-  filter: 'severity>=ERROR resource.type="cloud_function"'   # GCP Logging のクエリ
-  interval_sec: 60
-```
-
-| フィールド | 役割 |
-|---|---|
-| `project_id` | GCP プロジェクト ID |
-| `filter` | Cloud Logging のフィルタ式 |
-| `interval_sec` | ポーリング間隔（秒） |
-
-認証は GCP SDK の標準チェーン（`GOOGLE_APPLICATION_CREDENTIALS` / metadata server 等）に委譲。SDK は当該トリガーが存在するときのみ動的 import。同じ `(project_id, filter)` を購読する複数ランブックは 1 つのポーラーを共有する。
-
-カーソルは insertId とタイムスタンプの組で管理する（`aws_cloudwatch_logs` と同じ形）。ユーザ filter に加えて poller 側で `timestamp >= ...` を AND で重ねるので、フィルタ式自体に時刻条件を入れる必要はない。
+カーソルは Jira issue の `updated` を ms 値で保持し、同 ms に並ぶ issue_key を境界 dedup 用に保持する。`updated >=` の JQL 比較は分粒度なので、分境界に丸めた時刻をフィルタに使う。
 
 ### `github_workflow_runs`
 
@@ -263,8 +245,8 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 
 主要なテンプレ変数（トリガー別に値が変わるもの）:
 
-- `{{ event.line }}` — file の行 / aws_cloudwatch_logs の message / datadog_log の message / gcp_cloud_logging の message
-- `{{ event.path }}` — file のパス / aws_cloudwatch_logs の log_group / datadog_log の query / gcp_cloud_logging の logName
+- `{{ event.line }}` — file の行 / aws_cloudwatch_logs の message / datadog_log の message
+- `{{ event.path }}` — file のパス / aws_cloudwatch_logs の log_group / datadog_log の query
 - `{{ event.timestamp }}` — すべて。発火または遷移観測時刻（ISO 8601）
 - `{{ event.log_stream }}` — aws_cloudwatch_logs のみ
 - `{{ event.service }}` — datadog_log のみ
@@ -274,7 +256,6 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 - `{{ event.issue_key }}` / `{{ event.summary }}` — jira_issue のみ
 - `{{ event.status }}` — jira_issue / sentry_issue
 - `{{ event.issue_id }}` / `{{ event.title }}` / `{{ event.level }}` / `{{ event.permalink }}` — sentry_issue のみ
-- `{{ event.severity }}` / `{{ event.resource_type }}` — gcp_cloud_logging のみ
 - `{{ event.run_id }}` / `{{ event.workflow_name }}` / `{{ event.branch }}` / `{{ event.conclusion }}` / `{{ event.html_url }}` — github_workflow_run のみ
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
@@ -303,6 +284,5 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm 遷移 → PagerDuty trigger/resolve
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
 - `jira-open-incident-slack.yaml` — Jira incident updated → Slack 通知
-- `gcp-error-slack.yaml` — GCP Cloud Logging ERROR → Slack 通知
 - `github-ci-fix.yaml` — GitHub Actions CI 失敗 → 修正 PR を agent が作成
 - `sentry-jira.yaml` — Sentry issue 新規 or regression → Jira 起票

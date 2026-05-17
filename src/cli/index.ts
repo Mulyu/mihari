@@ -41,11 +41,6 @@ import {
   uniqueJiraSearchTriggers,
 } from "../triggers/jira-search.js";
 import {
-  GcpCloudLoggingPoller,
-  createGcpCloudLoggingApiFactory,
-  uniqueGcpCloudLoggingTriggers,
-} from "../triggers/gcp-cloud-logging.js";
-import {
   GithubWorkflowRunsPoller,
   createGithubWorkflowRunsApiFactory,
   uniqueGithubWorkflowRunsTriggers,
@@ -263,7 +258,6 @@ interface Ctx {
   datadogMonitorsPollers: DatadogMonitorsPoller[];
   datadogLogsPollers: DatadogLogsPoller[];
   jiraSearchPollers: JiraSearchPoller[];
-  gcpCloudLoggingPollers: GcpCloudLoggingPoller[];
   githubWorkflowRunsPollers: GithubWorkflowRunsPoller[];
   sentryIssuesPollers: SentryIssuesPoller[];
 }
@@ -283,9 +277,6 @@ function triggerSummary(t: Trigger): string {
   }
   if (t.source === "jira_search") {
     return `jira_search:${t.base}|${t.jql}`;
-  }
-  if (t.source === "gcp_cloud_logging") {
-    return `gcp_cloud_logging:${t.project_id}|${t.filter}`;
   }
   if (t.source === "github_workflow_runs") {
     const parts = [t.repo];
@@ -403,22 +394,6 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
-  const gcpGroups = uniqueGcpCloudLoggingTriggers(runbooks);
-  const gcpCloudLoggingPollers: GcpCloudLoggingPoller[] = [];
-  if (gcpGroups.length > 0) {
-    const factory = await createGcpCloudLoggingApiFactory();
-    for (const g of gcpGroups) {
-      gcpCloudLoggingPollers.push(
-        new GcpCloudLoggingPoller(
-          { projectId: g.projectId, filter: g.filter },
-          g.intervalSec,
-          state,
-          factory.forProject(g.projectId),
-        ),
-      );
-    }
-  }
-
   const ghGroups = uniqueGithubWorkflowRunsTriggers(runbooks);
   const githubWorkflowRunsPollers: GithubWorkflowRunsPoller[] = [];
   if (ghGroups.length > 0) {
@@ -462,7 +437,6 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     datadogMonitorsPollers,
     datadogLogsPollers,
     jiraSearchPollers,
-    gcpCloudLoggingPollers,
     githubWorkflowRunsPollers,
     sentryIssuesPollers,
   };

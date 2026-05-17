@@ -6,7 +6,6 @@ export type Trigger =
   | DatadogMonitorsTrigger
   | DatadogLogsTrigger
   | JiraSearchTrigger
-  | GcpCloudLoggingTrigger
   | GithubWorkflowRunsTrigger
   | SentryIssuesTrigger;
 
@@ -77,13 +76,6 @@ export interface JiraSearchTrigger {
   source: "jira_search";
   base: string;
   jql: string;
-  interval_sec: number;
-}
-
-export interface GcpCloudLoggingTrigger {
-  source: "gcp_cloud_logging";
-  project_id: string;
-  filter: string;
   interval_sec: number;
 }
 
@@ -182,18 +174,6 @@ export type TriggerEvent =
       timestamp: string;
     }
   | {
-      type: "gcp_cloud_logging";
-      project_id: string;
-      filter: string;
-      log_id: string;
-      log_name: string;
-      severity: string;
-      resource_type: string;
-      message: string;
-      timestamp: string;
-      timestamp_ms: number;
-    }
-  | {
       type: "github_workflow_run";
       repo: string;
       run_id: number;
@@ -281,14 +261,6 @@ export interface JiraSearchPollerState {
   jql: string;
   last_updated_ms: number;
   last_issue_keys: string[];
-  last_polled_at: string;
-}
-
-export interface GcpCloudLoggingPollerState {
-  project_id: string;
-  filter: string;
-  last_event_timestamp_ms: number;
-  last_event_ids: string[];
   last_polled_at: string;
 }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   JiraSearchPoller,
-  buildSearchUrl,
+  SEARCH_PATH,
+  buildSearchRequest,
   computeNextState,
   decidePoll,
   jiraJqlTimeString,
@@ -28,7 +29,7 @@ function fakeApi(
     calls,
     async searchIssues(input) {
       calls.push(input);
-      const r = responses[i] ?? { issues: [], total: 0 };
+      const r = responses[i] ?? { issues: [] };
       i++;
       return r;
     },
@@ -82,28 +83,49 @@ describe("jiraJqlTimeString", () => {
   });
 });
 
-describe("buildSearchUrl", () => {
-  it("appends updated >= filter and ORDER BY when fromMs > 0", () => {
-    const url = buildSearchUrl(
+describe("buildSearchRequest", () => {
+  it("targets the new /rest/api/3/search/jql endpoint", () => {
+    expect(SEARCH_PATH).toBe("/rest/api/3/search/jql");
+    const req = buildSearchRequest(
       "https://x.atlassian.net",
       "project = OPS",
       Date.parse("2026-05-09T12:00:00Z"),
-      0,
       50,
+      undefined,
     );
-    const u = new URL(url);
-    expect(u.pathname).toBe("/rest/api/3/search");
-    expect(u.searchParams.get("jql")).toBe(
+    expect(req.url).toBe(`https://x.atlassian.net${SEARCH_PATH}`);
+  });
+
+  it("appends updated >= filter and ORDER BY when fromMs > 0", () => {
+    const req = buildSearchRequest(
+      "https://x.atlassian.net",
+      "project = OPS",
+      Date.parse("2026-05-09T12:00:00Z"),
+      50,
+      undefined,
+    );
+    expect(req.body.jql).toBe(
       '(project = OPS) AND updated >= "2026-05-09 12:00" ORDER BY updated ASC',
     );
-    expect(u.searchParams.get("fields")).toBe("summary,status,updated");
-    expect(u.searchParams.get("maxResults")).toBe("50");
-    expect(u.searchParams.get("startAt")).toBe("0");
+    expect(req.body.fields).toEqual(["summary", "status", "updated"]);
+    expect(req.body.maxResults).toBe(50);
+    expect(req.body.nextPageToken).toBeUndefined();
   });
 
   it("omits updated >= filter when fromMs is 0", () => {
-    const url = buildSearchUrl("https://x.atlassian.net", "project = OPS", 0, 0, 50);
-    expect(new URL(url).searchParams.get("jql")).toBe("project = OPS ORDER BY updated ASC");
+    const req = buildSearchRequest("https://x.atlassian.net", "project = OPS", 0, 50, undefined);
+    expect(req.body.jql).toBe("project = OPS ORDER BY updated ASC");
+  });
+
+  it("includes nextPageToken in body when provided", () => {
+    const req = buildSearchRequest(
+      "https://x.atlassian.net",
+      "project = OPS",
+      Date.parse("2026-05-09T12:00:00Z"),
+      50,
+      "TOKEN-1",
+    );
+    expect(req.body.nextPageToken).toBe("TOKEN-1");
   });
 });
 
@@ -140,7 +162,7 @@ describe("decidePoll", () => {
 describe("JiraSearchPoller.tick", () => {
   it("first tick seeds state at minute boundary and emits no events", async () => {
     const state = fakeState(null);
-    const api = fakeApi([{ issues: [], total: 0 }]);
+    const api = fakeApi([{ issues: [] }]);
     const poller = new JiraSearchPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-09T12:00:30Z"));
     expect(events).toEqual([]);
@@ -163,7 +185,6 @@ describe("JiraSearchPoller.tick", () => {
           rawIssue({ key: "OPS-1", updated_ms: cursorMs + 30_000 }),
           rawIssue({ key: "OPS-2", updated_ms: cursorMs + 60_000 }),
         ],
-        total: 2,
       },
     ]);
     const poller = new JiraSearchPoller(KEY, 60, state, api);
@@ -189,7 +210,6 @@ describe("JiraSearchPoller.tick", () => {
           rawIssue({ key: "OPS-2", updated_ms: cursorMs }),
           rawIssue({ key: "OPS-3", updated_ms: cursorMs + 1000 }),
         ],
-        total: 3,
       },
     ]);
     const poller = new JiraSearchPoller(KEY, 60, state, api);
@@ -197,7 +217,7 @@ describe("JiraSearchPoller.tick", () => {
     expect(events.map((e) => e.issue_key)).toEqual(["OPS-2", "OPS-3"]);
   });
 
-  it("paginates while startAt < total", async () => {
+  it("paginates while nextPageToken is returned", async () => {
     const cursorMs = Date.parse("2026-05-09T12:00:00Z");
     const state = fakeState({
       base: KEY.base,
@@ -207,13 +227,16 @@ describe("JiraSearchPoller.tick", () => {
       last_polled_at: "2026-05-09T12:00:00Z",
     });
     const api = fakeApi([
-      { issues: [rawIssue({ key: "OPS-1", updated_ms: cursorMs + 1 })], total: 2 },
-      { issues: [rawIssue({ key: "OPS-2", updated_ms: cursorMs + 2 })], total: 2 },
+      {
+        issues: [rawIssue({ key: "OPS-1", updated_ms: cursorMs + 1 })],
+        nextPageToken: "T1",
+      },
+      { issues: [rawIssue({ key: "OPS-2", updated_ms: cursorMs + 2 })] },
     ]);
     const poller = new JiraSearchPoller(KEY, 60, state, api);
     const events = await poller.tick(new Date("2026-05-09T12:01:00Z"));
     expect(api.calls).toHaveLength(2);
-    expect(api.calls[1]?.startAt).toBe(1);
+    expect(api.calls[1]?.nextPageToken).toBe("T1");
     expect(events.map((e) => e.issue_key)).toEqual(["OPS-1", "OPS-2"]);
   });
 
@@ -226,9 +249,7 @@ describe("JiraSearchPoller.tick", () => {
       last_issue_keys: [],
       last_polled_at: "2026-05-09T12:00:00Z",
     });
-    const api = fakeApi([
-      { issues: [rawIssue({ key: "OPS-1", updated_ms: cursorMs + 10 })], total: 1 },
-    ]);
+    const api = fakeApi([{ issues: [rawIssue({ key: "OPS-1", updated_ms: cursorMs + 10 })] }]);
     const poller = new JiraSearchPoller(KEY, 60, state, api);
     await poller.tick(new Date("2026-05-09T12:01:00Z"), true);
     expect(state.saved).toHaveLength(0);

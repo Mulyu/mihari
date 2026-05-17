@@ -1,7 +1,7 @@
 import type { AgentContext } from "../types/index.js";
 
 const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.severity|event\.resource_type|event\.run_id|event\.workflow_name|event\.branch|event\.conclusion|event\.html_url|event\.issue_id|event\.title|event\.level|event\.permalink|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.run_id|event\.workflow_name|event\.branch|event\.conclusion|event\.html_url|event\.issue_id|event\.title|event\.level|event\.permalink|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 export function substituteTemplate(text: string, ctx: AgentContext): string {
   return text.replace(TEMPLATE_RE, (raw, key: string) => {
@@ -9,14 +9,12 @@ export function substituteTemplate(text: string, ctx: AgentContext): string {
       if (ctx.event.type === "file") return ctx.event.content;
       if (ctx.event.type === "aws_cloudwatch_logs") return ctx.event.message;
       if (ctx.event.type === "datadog_log") return ctx.event.message;
-      if (ctx.event.type === "gcp_cloud_logging") return ctx.event.message;
       return "";
     }
     if (key === "event.path") {
       if (ctx.event.type === "file") return ctx.event.path;
       if (ctx.event.type === "aws_cloudwatch_logs") return ctx.event.log_group;
       if (ctx.event.type === "datadog_log") return ctx.event.query;
-      if (ctx.event.type === "gcp_cloud_logging") return ctx.event.log_name;
       return "";
     }
     if (key === "event.service") {
@@ -47,12 +45,6 @@ export function substituteTemplate(text: string, ctx: AgentContext): string {
     }
     if (key === "event.permalink") {
       return ctx.event.type === "sentry_issue" ? ctx.event.permalink : "";
-    }
-    if (key === "event.severity") {
-      return ctx.event.type === "gcp_cloud_logging" ? ctx.event.severity : "";
-    }
-    if (key === "event.resource_type") {
-      return ctx.event.type === "gcp_cloud_logging" ? ctx.event.resource_type : "";
     }
     if (key === "event.run_id") {
       return ctx.event.type === "github_workflow_run" ? String(ctx.event.run_id) : "";

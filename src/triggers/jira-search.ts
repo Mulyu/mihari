@@ -14,7 +14,7 @@ export type JiraIssueEvent = Extract<TriggerEvent, { type: "jira_issue" }>;
 export interface SearchIssuesInput {
   jql: string;
   fromMs: number;
-  startAt: number;
+  nextPageToken?: string;
   maxResults: number;
 }
 
@@ -28,7 +28,7 @@ export interface RawIssue {
 
 export interface SearchIssuesOutput {
   issues: RawIssue[];
-  total: number;
+  nextPageToken?: string;
 }
 
 export interface JiraSearchApi {
@@ -41,6 +41,8 @@ export interface JiraSearchApiFactory {
 
 export const PAGE_SIZE = 100;
 export const PAGINATION_HOP_CAP = 50;
+
+export const SEARCH_PATH = "/rest/api/3/search/jql";
 
 export interface PollDecision {
   action: "poll" | "skip" | "seed";
@@ -96,24 +98,24 @@ export class JiraSearchPoller {
 
     const seenKeys = new Set(prev?.last_issue_keys ?? []);
     const collected: RawIssue[] = [];
-    let startAt = 0;
+    let nextPageToken: string | undefined;
     let hops = 0;
 
     while (true) {
       const res = await this.api.searchIssues({
         jql: this.key.jql,
         fromMs: decision.fromMs,
-        startAt,
         maxResults: PAGE_SIZE,
+        ...(nextPageToken !== undefined ? { nextPageToken } : {}),
       });
       for (const i of res.issues) {
         if (i.updated_ms < decision.fromMs) continue;
         if (i.updated_ms === decision.fromMs && seenKeys.has(i.key)) continue;
         collected.push(i);
       }
-      startAt += res.issues.length;
       hops++;
-      if (res.issues.length === 0 || startAt >= res.total) break;
+      if (res.nextPageToken === undefined) break;
+      nextPageToken = res.nextPageToken;
       if (hops >= PAGINATION_HOP_CAP) {
         log.warn(
           { jql: this.key.jql, hops },
@@ -222,24 +224,36 @@ export function jiraJqlTimeString(ms: number): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
-export function buildSearchUrl(
+export interface SearchRequest {
+  url: string;
+  body: {
+    jql: string;
+    fields: string[];
+    maxResults: number;
+    nextPageToken?: string;
+  };
+}
+
+// /rest/api/3/search/jql は新エンドポイント (旧 /rest/api/3/search は Jira Cloud で廃止)。
+// JQL や fields は POST body に乗せ、ページングは cursor (nextPageToken) で行う。
+export function buildSearchRequest(
   base: string,
   jql: string,
   fromMs: number,
-  startAt: number,
   maxResults: number,
-): string {
+  nextPageToken: string | undefined,
+): SearchRequest {
   const composed =
     fromMs > 0
       ? `(${jql}) AND updated >= "${jiraJqlTimeString(fromMs)}" ORDER BY updated ASC`
       : `${jql} ORDER BY updated ASC`;
-  const params = new URLSearchParams({
+  const body: SearchRequest["body"] = {
     jql: composed,
-    fields: "summary,status,updated",
-    maxResults: String(maxResults),
-    startAt: String(startAt),
-  });
-  return `${base}/rest/api/3/search?${params.toString()}`;
+    fields: ["summary", "status", "updated"],
+    maxResults,
+  };
+  if (nextPageToken !== undefined) body.nextPageToken = nextPageToken;
+  return { url: `${base}${SEARCH_PATH}`, body };
 }
 
 // Jira は SDK を持たず fetch で叩く（Node 20+ の global fetch）。認証は env JIRA_USER /
@@ -262,19 +276,28 @@ export async function createJiraSearchApiFactory(): Promise<JiraSearchApiFactory
       if (existing) return existing;
       const api: JiraSearchApi = {
         async searchIssues(input) {
-          const url = buildSearchUrl(base, input.jql, input.fromMs, input.startAt, input.maxResults);
-          const res = await fetch(url, {
+          const req = buildSearchRequest(
+            base,
+            input.jql,
+            input.fromMs,
+            input.maxResults,
+            input.nextPageToken,
+          );
+          const res = await fetch(req.url, {
+            method: "POST",
             headers: {
               Authorization: `Basic ${auth}`,
+              "Content-Type": "application/json",
               Accept: "application/json",
             },
+            body: JSON.stringify(req.body),
           });
           if (!res.ok) {
             const text = await res.text();
             throw new Error(`jira search ${res.status}: ${text.slice(0, 200)}`);
           }
           const body = (await res.json()) as {
-            total?: number;
+            nextPageToken?: string;
             issues?: Array<{
               key?: string;
               fields?: {
@@ -299,7 +322,7 @@ export async function createJiraSearchApiFactory(): Promise<JiraSearchApiFactory
           }
           return {
             issues,
-            total: typeof body.total === "number" ? body.total : issues.length,
+            ...(typeof body.nextPageToken === "string" ? { nextPageToken: body.nextPageToken } : {}),
           };
         },
       };

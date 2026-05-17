@@ -18,7 +18,6 @@ import type {
   DatadogLogsPollerState,
   DatadogMonitorState,
   DatadogMonitorsPollerState,
-  GcpCloudLoggingPollerState,
   GithubWorkflowRunsPollerState,
   JiraSearchPollerState,
   PollerState,
@@ -45,7 +44,6 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "datadog-monitors"), { recursive: true });
     mkdirSync(join(this.baseDir, "datadog-logs"), { recursive: true });
     mkdirSync(join(this.baseDir, "jira-search"), { recursive: true });
-    mkdirSync(join(this.baseDir, "gcp-cloud-logging"), { recursive: true });
     mkdirSync(join(this.baseDir, "github-workflow-runs"), { recursive: true });
     mkdirSync(join(this.baseDir, "sentry-issues"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
@@ -332,50 +330,6 @@ export class StateStore {
     }
   }
 
-  gcpCloudLoggingStateFile(key: { projectId: string; filter: string }): string {
-    const hash = createHash("sha1")
-      .update(`${key.projectId}|${key.filter}`)
-      .digest("hex")
-      .slice(0, 16);
-    return join(this.baseDir, "gcp-cloud-logging", `${hash}.json`);
-  }
-
-  loadGcpCloudLoggingState(key: {
-    projectId: string;
-    filter: string;
-  }): GcpCloudLoggingPollerState | null {
-    const file = this.gcpCloudLoggingStateFile(key);
-    try {
-      const text = readFileSync(file, "utf8");
-      const obj = JSON.parse(text);
-      if (!validateGcpCloudLoggingState(obj)) {
-        log.warn({ file }, "gcp-cloud-logging state invalid, ignoring");
-        return null;
-      }
-      return obj;
-    } catch (e: unknown) {
-      const err = e as NodeJS.ErrnoException;
-      if (err.code === "ENOENT") return null;
-      log.warn(
-        { file, err: err.message },
-        "gcp-cloud-logging state read failed, treating as empty",
-      );
-      return null;
-    }
-  }
-
-  async saveGcpCloudLoggingState(state: GcpCloudLoggingPollerState): Promise<void> {
-    const file = this.gcpCloudLoggingStateFile({
-      projectId: state.project_id,
-      filter: state.filter,
-    });
-    try {
-      await writeAtomic(file, JSON.stringify(state, null, 2));
-    } catch (e) {
-      log.warn({ file, err: (e as Error).message }, "gcp-cloud-logging state write failed");
-    }
-  }
-
   githubWorkflowRunsStateFile(key: { repo: string }): string {
     const hash = createHash("sha1").update(key.repo).digest("hex").slice(0, 16);
     return join(this.baseDir, "github-workflow-runs", `${hash}.json`);
@@ -649,22 +603,6 @@ function validateGithubWorkflowRunsState(v: unknown): v is GithubWorkflowRunsPol
     typeof o["last_run_id"] === "number" &&
     typeof o["last_polled_at"] === "string"
   );
-}
-
-function validateGcpCloudLoggingState(v: unknown): v is GcpCloudLoggingPollerState {
-  if (typeof v !== "object" || v === null) return false;
-  const o = v as Record<string, unknown>;
-  if (
-    typeof o["project_id"] !== "string" ||
-    typeof o["filter"] !== "string" ||
-    typeof o["last_event_timestamp_ms"] !== "number" ||
-    typeof o["last_polled_at"] !== "string"
-  ) {
-    return false;
-  }
-  const ids = o["last_event_ids"];
-  if (!Array.isArray(ids)) return false;
-  return ids.every((x) => typeof x === "string");
 }
 
 function validateJiraSearchState(v: unknown): v is JiraSearchPollerState {

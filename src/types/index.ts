@@ -4,7 +4,8 @@ export type Trigger =
   | AwsCloudWatchLogsTrigger
   | AwsCloudWatchAlarmsTrigger
   | DatadogMonitorsTrigger
-  | DatadogLogsTrigger;
+  | DatadogLogsTrigger
+  | JiraSearchTrigger;
 
 export interface Runbook {
   id: string;
@@ -69,6 +70,13 @@ export interface DatadogLogsTrigger {
   interval_sec: number;
 }
 
+export interface JiraSearchTrigger {
+  source: "jira_search";
+  base: string;
+  jql: string;
+  interval_sec: number;
+}
+
 export interface Agent {
   prompt: string;
   system?: string;
@@ -125,6 +133,17 @@ export type TriggerEvent =
       message: string;
       timestamp: string;
       timestamp_ms: number;
+    }
+  | {
+      type: "jira_issue";
+      base: string;
+      jql: string;
+      issue_key: string;
+      summary: string;
+      status: string;
+      updated: string;
+      updated_ms: number;
+      timestamp: string;
     };
 
 export interface AgentContext {
@@ -177,6 +196,14 @@ export interface DatadogLogsPollerState {
   query: string;
   last_event_timestamp_ms: number;
   last_event_ids: string[];
+  last_polled_at: string;
+}
+
+export interface JiraSearchPollerState {
+  base: string;
+  jql: string;
+  last_updated_ms: number;
+  last_issue_keys: string[];
   last_polled_at: string;
 }
 

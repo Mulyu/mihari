@@ -121,6 +121,26 @@ Authentication uses the same `DD_API_KEY` / `DD_APP_KEY` env vars as `datadog_mo
 
 The cursor is timestamp-based, with event ids at the boundary kept for dedup (same shape as `aws_cloudwatch_logs`). If a tick cannot drain all results, the rest carries to the next tick.
 
+### `jira_search`
+
+```yaml
+trigger:
+  source: jira_search
+  base: https://example.atlassian.net      # Jira base URL (trailing slashes are stripped)
+  jql: project = OPS AND status = Open     # must NOT include ORDER BY
+  interval_sec: 120
+```
+
+| Field | Purpose |
+|---|---|
+| `base` | Jira base URL (`http://` or `https://`) |
+| `jql` | Search filter. Do not include `ORDER BY` (the poller orders by `updated ASC`) |
+| `interval_sec` | Polling interval in seconds |
+
+Authentication is basic auth built from env `JIRA_USER` / `JIRA_TOKEN`. No SDK is used — the poller calls Node's global `fetch`, so nothing is dynamically imported for this trigger. Multiple runbooks subscribing to the same `(base, jql)` share one poller.
+
+The cursor is the Jira issue `updated` time in ms, with the issue keys at the boundary ms kept for dedup. The JQL `updated >=` comparison is minute-granular, so the filter time is floored to a minute boundary. Per-tick `startAt` pagination caps at 50 pages.
+
 ## Agent
 
 ```yaml
@@ -179,6 +199,7 @@ Per-trigger template variables (those whose value depends on the trigger source)
 - `{{ event.host }}` — datadog_log only
 - `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm only
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor only
+- `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue only
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
 
@@ -205,3 +226,4 @@ See `runbooks/examples/`:
 - `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack triage
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm transitions → PagerDuty trigger/resolve
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
+- `jira-open-incident-slack.yaml` — Jira incident updated → Slack notification

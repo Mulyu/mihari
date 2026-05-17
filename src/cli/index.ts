@@ -35,6 +35,11 @@ import {
   createDatadogLogsApiFactory,
   uniqueDatadogLogsTriggers,
 } from "../triggers/datadog-logs.js";
+import {
+  JiraSearchPoller,
+  createJiraSearchApiFactory,
+  uniqueJiraSearchTriggers,
+} from "../triggers/jira-search.js";
 import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
@@ -242,6 +247,7 @@ interface Ctx {
   awsCloudWatchAlarmsPollers: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers: DatadogMonitorsPoller[];
   datadogLogsPollers: DatadogLogsPoller[];
+  jiraSearchPollers: JiraSearchPoller[];
 }
 
 function triggerSummary(t: Trigger): string {
@@ -256,6 +262,9 @@ function triggerSummary(t: Trigger): string {
   }
   if (t.source === "datadog_logs") {
     return `datadog_logs:${t.site}|${t.query}`;
+  }
+  if (t.source === "jira_search") {
+    return `jira_search:${t.base}|${t.jql}`;
   }
   const tags = (t.monitor_tags ?? []).join(",");
   return `datadog_monitors:${t.site}|${tags}`;
@@ -347,6 +356,22 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     }
   }
 
+  const jiraGroups = uniqueJiraSearchTriggers(runbooks);
+  const jiraSearchPollers: JiraSearchPoller[] = [];
+  if (jiraGroups.length > 0) {
+    const factory = await createJiraSearchApiFactory();
+    for (const g of jiraGroups) {
+      jiraSearchPollers.push(
+        new JiraSearchPoller(
+          { base: g.base, jql: g.jql },
+          g.intervalSec,
+          state,
+          factory.forBase(g.base),
+        ),
+      );
+    }
+  }
+
   return {
     runbooks,
     state,
@@ -357,6 +382,7 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     awsCloudWatchAlarmsPollers,
     datadogMonitorsPollers,
     datadogLogsPollers,
+    jiraSearchPollers,
   };
 }
 

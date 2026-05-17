@@ -18,6 +18,7 @@ import type {
   DatadogLogsPollerState,
   DatadogMonitorState,
   DatadogMonitorsPollerState,
+  JiraSearchPollerState,
   PollerState,
   RunResult,
   TriggerState,
@@ -40,6 +41,7 @@ export class StateStore {
     mkdirSync(join(this.baseDir, "aws-cloudwatch-alarms"), { recursive: true });
     mkdirSync(join(this.baseDir, "datadog-monitors"), { recursive: true });
     mkdirSync(join(this.baseDir, "datadog-logs"), { recursive: true });
+    mkdirSync(join(this.baseDir, "jira-search"), { recursive: true });
     mkdirSync(join(this.baseDir, "runs"), { recursive: true });
   }
 
@@ -289,6 +291,41 @@ export class StateStore {
     }
   }
 
+  jiraSearchStateFile(key: { base: string; jql: string }): string {
+    const hash = createHash("sha1")
+      .update(`${key.base}|${key.jql}`)
+      .digest("hex")
+      .slice(0, 16);
+    return join(this.baseDir, "jira-search", `${hash}.json`);
+  }
+
+  loadJiraSearchState(key: { base: string; jql: string }): JiraSearchPollerState | null {
+    const file = this.jiraSearchStateFile(key);
+    try {
+      const text = readFileSync(file, "utf8");
+      const obj = JSON.parse(text);
+      if (!validateJiraSearchState(obj)) {
+        log.warn({ file }, "jira-search state invalid, ignoring");
+        return null;
+      }
+      return obj;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return null;
+      log.warn({ file, err: err.message }, "jira-search state read failed, treating as empty");
+      return null;
+    }
+  }
+
+  async saveJiraSearchState(state: JiraSearchPollerState): Promise<void> {
+    const file = this.jiraSearchStateFile({ base: state.base, jql: state.jql });
+    try {
+      await writeAtomic(file, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn({ file, err: (e as Error).message }, "jira-search state write failed");
+    }
+  }
+
   async appendRunResult(result: RunResult): Promise<void> {
     const date = result.started_at.slice(0, 10);
     const dir = join(this.baseDir, "runs", date);
@@ -445,6 +482,22 @@ function validateAwsCloudWatchLogsState(v: unknown): v is AwsCloudWatchLogsPolle
   const ids = o["last_event_ids"];
   if (!Array.isArray(ids)) return false;
   return ids.every((x) => typeof x === "string");
+}
+
+function validateJiraSearchState(v: unknown): v is JiraSearchPollerState {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o["base"] !== "string" ||
+    typeof o["jql"] !== "string" ||
+    typeof o["last_updated_ms"] !== "number" ||
+    typeof o["last_polled_at"] !== "string"
+  ) {
+    return false;
+  }
+  const ks = o["last_issue_keys"];
+  if (!Array.isArray(ks)) return false;
+  return ks.every((x) => typeof x === "string");
 }
 
 function validateDatadogLogsState(v: unknown): v is DatadogLogsPollerState {

@@ -64,7 +64,7 @@ mihari run dd-monitor-jira
 mihari list
 ```
 
-トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` / `aws_cloudwatch_alarms:<region>|<カンマ区切り alarm_names>` / `datadog_monitors:<site>|<カンマ区切り monitor_tags>` / `datadog_logs:<site>|<query>` のいずれか。
+トリガー表記は `file:<path>` / `cron:<schedule>` / `aws_cloudwatch_logs:<region>|<log_group>` / `aws_cloudwatch_alarms:<region>|<カンマ区切り alarm_names>` / `datadog_monitors:<site>|<カンマ区切り monitor_tags>` / `datadog_logs:<site>|<query>` / `jira_search:<base>|<jql>` のいずれか。
 
 ## `mihari status`
 
@@ -83,7 +83,7 @@ cw-error-triage     aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03
 dd-monitor-jira     datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
 ```
 
-`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `file` / `aws_cloudwatch_logs` / `aws_cloudwatch_alarms` / `datadog_monitors` / `datadog_logs` トリガーでは常に `-`。
+`enabled: false` のランブックは行頭に `[disabled]` が付く。`NEXT` 列は `cron` 以外のトリガーでは常に `-`。
 
 ## `mihari validate <path>`
 

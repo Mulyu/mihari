@@ -4,6 +4,7 @@ import {
   matchAwsCloudWatchLogs,
   matchDatadogLog,
   matchDatadogMonitor,
+  matchJiraIssue,
 } from "./matcher.js";
 import type { Executor } from "./executor.js";
 import type { CronScheduler } from "../triggers/cron.js";
@@ -12,6 +13,7 @@ import type { AwsCloudWatchLogsPoller } from "../triggers/aws-cloudwatch-logs.js
 import type { AwsCloudWatchAlarmsPoller } from "../triggers/aws-cloudwatch-alarms.js";
 import type { DatadogMonitorsPoller } from "../triggers/datadog-monitors.js";
 import type { DatadogLogsPoller } from "../triggers/datadog-logs.js";
+import type { JiraSearchPoller } from "../triggers/jira-search.js";
 import type { StateStore } from "../state/store.js";
 import type { Runbook } from "../types/index.js";
 
@@ -24,6 +26,7 @@ export interface DispatcherInput {
   awsCloudWatchAlarmsPollers?: AwsCloudWatchAlarmsPoller[];
   datadogMonitorsPollers?: DatadogMonitorsPoller[];
   datadogLogsPollers?: DatadogLogsPoller[];
+  jiraSearchPollers?: JiraSearchPoller[];
   executor: Executor;
   state: StateStore;
 }
@@ -134,6 +137,26 @@ export async function tick(
         if (opts.dryRun) {
           opts.onDryRun?.(
             `${m.runbook.id} <- datadog_logs:${event.site}|${event.query}: ${event.message}`,
+          );
+          continue;
+        }
+        const result = await input.executor.execute(m.runbook, m.event);
+        if (!result.ok) ok = false;
+      }
+    }
+  }
+
+  for (const jiraPoller of input.jiraSearchPollers ?? []) {
+    const events = await jiraPoller.tick(new Date(), opts.dryRun ?? false);
+    for (const event of events) {
+      const matches = matchJiraIssue(event, input.runbooks);
+      for (const m of matches) {
+        if (m.runbook.enabled === false) continue;
+        if (!isCooldownElapsed(m.runbook, input.state)) continue;
+        fired++;
+        if (opts.dryRun) {
+          opts.onDryRun?.(
+            `${m.runbook.id} <- jira_search:${event.base}|${event.jql}: ${event.issue_key} ${event.status}`,
           );
           continue;
         }

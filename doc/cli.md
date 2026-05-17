@@ -64,7 +64,7 @@ Lists runbooks. Each row is `<id>\t<trigger>\t<description>`.
 mihari list
 ```
 
-The trigger column is rendered as `file:<path>`, `cron:<schedule>`, `aws_cloudwatch_logs:<region>|<log_group>`, `aws_cloudwatch_alarms:<region>|<comma-joined alarm_names>`, `datadog_monitors:<site>|<comma-joined monitor_tags>`, or `datadog_logs:<site>|<query>`.
+The trigger column is rendered as `file:<path>`, `cron:<schedule>`, `aws_cloudwatch_logs:<region>|<log_group>`, `aws_cloudwatch_alarms:<region>|<comma-joined alarm_names>`, `datadog_monitors:<site>|<comma-joined monitor_tags>`, `datadog_logs:<site>|<query>`, or `jira_search:<base>|<jql>`.
 
 ## `mihari status`
 
@@ -83,7 +83,7 @@ cw-error-triage     aws_cloudwatch_logs:us-east-1|/aws/lambda/fn   2026-04-29T03
 dd-monitor-jira     datadog_monitors:datadoghq.com|env:prod        2026-04-29T03:00Z   ok    -
 ```
 
-Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for `file`, `aws_cloudwatch_logs`, `aws_cloudwatch_alarms`, `datadog_monitors`, and `datadog_logs` triggers.
+Runbooks with `enabled: false` are prefixed with `[disabled]`. The `NEXT` column is always `-` for every trigger other than `cron`.
 
 ## `mihari validate <path>`
 

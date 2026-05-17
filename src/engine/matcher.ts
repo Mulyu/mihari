@@ -5,6 +5,7 @@ import type {
   DatadogLogsTrigger,
   DatadogMonitorsTrigger,
   FileTrigger,
+  JiraSearchTrigger,
   Match,
   Runbook,
   TriggerEvent,
@@ -15,6 +16,7 @@ type AwsCloudWatchLogsRunbook = Runbook & { trigger: AwsCloudWatchLogsTrigger };
 type AwsCloudWatchAlarmsRunbook = Runbook & { trigger: AwsCloudWatchAlarmsTrigger };
 type DatadogMonitorsRunbook = Runbook & { trigger: DatadogMonitorsTrigger };
 type DatadogLogsRunbook = Runbook & { trigger: DatadogLogsTrigger };
+type JiraSearchRunbook = Runbook & { trigger: JiraSearchTrigger };
 
 function isFileRunbook(rb: Runbook): rb is FileRunbook {
   return rb.trigger.source === "file";
@@ -34,6 +36,10 @@ function isDatadogMonitorsRunbook(rb: Runbook): rb is DatadogMonitorsRunbook {
 
 function isDatadogLogsRunbook(rb: Runbook): rb is DatadogLogsRunbook {
   return rb.trigger.source === "datadog_logs";
+}
+
+function isJiraSearchRunbook(rb: Runbook): rb is JiraSearchRunbook {
+  return rb.trigger.source === "jira_search";
 }
 
 export function match(
@@ -111,6 +117,16 @@ export function matchDatadogLog(
   return runbooks
     .filter(isDatadogLogsRunbook)
     .filter((r) => r.trigger.site === event.site && r.trigger.query === event.query)
+    .map((r) => ({ runbook: r, event }));
+}
+
+export function matchJiraIssue(
+  event: Extract<TriggerEvent, { type: "jira_issue" }>,
+  runbooks: Runbook[],
+): Match[] {
+  return runbooks
+    .filter(isJiraSearchRunbook)
+    .filter((r) => r.trigger.base === event.base && r.trigger.jql === event.jql)
     .map((r) => ({ runbook: r, event }));
 }
 

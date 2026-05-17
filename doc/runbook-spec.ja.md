@@ -121,7 +121,26 @@ trigger:
 
 カーソルは timestamp ベースで、同 timestamp に並ぶ event id を境界 dedup 用に保持する（`aws_cloudwatch_logs` と同じパターン）。1 tick で取り切れない場合は次 tick に持ち越す。
 
-## Agent
+### `jira_search`
+
+```yaml
+trigger:
+  source: jira_search
+  base: https://example.atlassian.net      # Jira のベース URL（末尾スラッシュは無視）
+  jql: project = OPS AND status = Open     # ORDER BY は書かない
+  interval_sec: 120
+```
+
+| フィールド | 役割 |
+|---|---|
+| `base` | Jira のベース URL（`http://` または `https://`） |
+| `jql` | 検索条件。`ORDER BY` は書かない（poller が `updated ASC` で並べる） |
+| `interval_sec` | ポーリング間隔（秒） |
+
+認証は環境変数 `JIRA_USER` / `JIRA_TOKEN` から basic 認証を組む。SDK は使わず Node 標準の global fetch を使う（動的 import なし）。同じ `(base, jql)` を購読する複数ランブックは 1 つのポーラーを共有する。
+
+カーソルは Jira issue の `updated` を ms 値で保持し、同 ms に並ぶ issue_key を境界 dedup 用に保持する。`updated >=` の JQL 比較は分粒度なので、分境界に丸めた時刻をフィルタに使う。1 tick の startAt ページング cap は 50。
+
 
 ```yaml
 agent:
@@ -179,6 +198,7 @@ mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を ag
 - `{{ event.host }}` — datadog_log のみ
 - `{{ event.alarm_name }}` / `{{ event.alarm_arn }}` — aws_cloudwatch_alarm のみ
 - `{{ event.monitor_id }}` / `{{ event.monitor_name }}` — datadog_monitor のみ
+- `{{ event.issue_key }}` / `{{ event.summary }}` / `{{ event.status }}` — jira_issue のみ
 - `{{ event.from_state }}` / `{{ event.to_state }}` — aws_cloudwatch_alarm / datadog_monitor
 - `{{ env.<NAME> }}` — `process.env[NAME]`
 
@@ -205,3 +225,4 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 - `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack 一次切り分け
 - `cw-alarm-pagerduty.yaml` — CloudWatch alarm 遷移 → PagerDuty trigger/resolve
 - `dd-logs-pagerduty.yaml` — Datadog Logs ERROR → PagerDuty trigger
+- `jira-open-incident-slack.yaml` — Jira incident updated → Slack 通知

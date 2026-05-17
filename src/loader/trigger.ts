@@ -141,9 +141,33 @@ export function validateTrigger(raw: unknown, file: string): Trigger {
       interval_sec,
     };
   }
+  if (source === "jira_search") {
+    const base = mustString(raw, "base", file, "trigger.base");
+    if (!/^https?:\/\//.test(base))
+      throw new RunbookValidationError(file, "trigger.base must be a http(s) URL");
+    const jql = mustString(raw, "jql", file, "trigger.jql");
+    if (/order\s+by/i.test(jql))
+      throw new RunbookValidationError(
+        file,
+        'trigger.jql must not include "ORDER BY" (the poller orders by updated)',
+      );
+    const interval_sec = optionalNumber(raw, "interval_sec", file, "trigger.interval_sec");
+    if (interval_sec === undefined) {
+      throw new RunbookValidationError(file, "trigger.interval_sec is required");
+    }
+    if (interval_sec <= 0) {
+      throw new RunbookValidationError(file, "trigger.interval_sec must be > 0");
+    }
+    return {
+      source: "jira_search",
+      base: base.replace(/\/+$/, ""),
+      jql,
+      interval_sec,
+    };
+  }
   throw new RunbookValidationError(
     file,
-    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", "aws_cloudwatch_alarms", "datadog_monitors", or "datadog_logs" (got: ${source})`,
+    `trigger.source must be "file", "cron", "aws_cloudwatch_logs", "aws_cloudwatch_alarms", "datadog_monitors", "datadog_logs", or "jira_search" (got: ${source})`,
   );
 }
 

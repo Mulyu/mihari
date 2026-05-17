@@ -1,7 +1,7 @@
 import type { AgentContext } from "../types/index.js";
 
 const TEMPLATE_RE =
-  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+  /\{\{\s*(event\.line|event\.path|event\.timestamp|event\.log_stream|event\.monitor_id|event\.monitor_name|event\.alarm_name|event\.alarm_arn|event\.service|event\.host|event\.issue_key|event\.summary|event\.status|event\.from_state|event\.to_state|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 export function substituteTemplate(text: string, ctx: AgentContext): string {
   return text.replace(TEMPLATE_RE, (raw, key: string) => {
@@ -22,6 +22,15 @@ export function substituteTemplate(text: string, ctx: AgentContext): string {
     }
     if (key === "event.host") {
       return ctx.event.type === "datadog_log" ? ctx.event.host : "";
+    }
+    if (key === "event.issue_key") {
+      return ctx.event.type === "jira_issue" ? ctx.event.issue_key : "";
+    }
+    if (key === "event.summary") {
+      return ctx.event.type === "jira_issue" ? ctx.event.summary : "";
+    }
+    if (key === "event.status") {
+      return ctx.event.type === "jira_issue" ? ctx.event.status : "";
     }
     if (key === "event.timestamp") return ctx.event.timestamp;
     if (key === "event.log_stream") {

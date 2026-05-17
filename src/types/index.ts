@@ -1,7 +1,5 @@
 export type Trigger = FileTrigger | CronTrigger | AwsCloudWatchLogsTrigger | DatadogMonitorsTrigger;
 
-export type Provider = "datadog" | "jira" | "slack";
-
 export interface Runbook {
   id: string;
   description?: string;
@@ -58,7 +56,6 @@ export interface Agent {
   timeout_sec: number;
   conventions: boolean;
   cwd?: string;
-  providers: Provider[];
 }
 
 export type TriggerEvent =

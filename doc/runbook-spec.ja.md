@@ -89,11 +89,6 @@ agent:
   system_file: prompts/system.md          # 任意。system と排他
   model: claude-opus-4-7                  # 既定 claude-opus-4-7
 
-  providers:                              # 任意。SaaS 用 preamble の opt-in
-    - datadog
-    - jira
-    - slack
-
   allowed_tools:                          # 必須・非空
     - Read
     - "Bash(curl:*)"
@@ -112,7 +107,6 @@ agent:
 | `prompt` / `prompt_file` | プロンプト本文かそのファイル（排他、どちらか必須） |
 | `system` / `system_file` | system プロンプト（任意、排他） |
 | `model` | モデル ID（既定 `claude-opus-4-7`） |
-| `providers` | preamble の opt-in 一覧。`datadog` / `jira` / `slack` を宣言した順に system prompt の頭に preamble が挿入される |
 | `allowed_tools` | ツール許可リスト。`Read` / `Edit` / `Write` のような名前と `Bash(<command>:*)` / `Bash(<exact>)` のパターンを混在できる。**非空必須**。リスト外のツール呼び出しはプロンプトを出さずに拒否される |
 | `permission_mode` | `strict`（既定）は `canUseTool` で全ツール呼び出しを判定。`bypass` は `allowDangerouslySkipPermissions` を立てる |
 | `max_turns` | 最大ターン数。mihari 既定 `30` |
@@ -120,19 +114,13 @@ agent:
 | `cwd` | エージェントの作業ディレクトリ（絶対パス）。既定は mihari 起動時のディレクトリ |
 | `conventions` | `true` で、`claude/fix-$MIHARI_IDEMPOTENCY_KEY` を branch 名にする / 既存 branch / 既存 open PR / dirty tree を検出したらスキップする旨の preamble を冒頭に挿入する。preamble は `git status:*` / `git ls-remote:*` / `gh pr list:*` を要求するので、有効化する場合は `allowed_tools` に追加すること。既定 `false` |
 
-合成された system prompt の順序は `[conventions preamble（true のとき）] → [providers の順に preamble] → [user system]`。
+合成された system prompt の順序は `[conventions preamble（true のとき）] → [user system]`。
 
-## Provider
+## SaaS 連携
 
-`agent.providers: [...]` を宣言すると、サービスごとの preamble が system prompt に挿入される。認証は環境変数（mihari は YAML に secret を置かない）。
+mihari 自体は SaaS（Datadog / Jira / Slack 等）の呼び出し作法を agent に注入しない。認証 env 名・エンドポイント・curl 例・冪等性パターンは、ランブック著者が `agent.prompt` または `agent.system` に直接書く責務。
 
-| Provider | 必須環境変数 | preamble の内容 |
-|---|---|---|
-| `datadog` | `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE` | API/APP キーヘッダ付きの curl テンプレ、主要エンドポイント（monitor / events / metric query） |
-| `jira` | `JIRA_BASE`, `JIRA_USER`, `JIRA_TOKEN` | basic 認証 curl テンプレ、search / create / transition、`MIHARI_IDEMPOTENCY_KEY` を使った冪等性パターン |
-| `slack` | `SLACK_WEBHOOK_URL` | incoming webhook curl テンプレ |
-
-起動時に必須 env が不足していても **warn ログのみで処理は止めない**。実際に当該 API を叩いた段階で SDK が失敗を返し、ランブックが ok=false になる。
+実例は `runbooks/examples/dd-monitor-jira.yaml` などを参照。`MIHARI_IDEMPOTENCY_KEY` は agent の env に常時注入されるので、重複検出（issue 検索 / branch 名 / message タグ等）にそのまま使える。
 
 ## 変数
 
@@ -165,7 +153,7 @@ mihari validate runbooks/                # ディレクトリを渡すと中身�
 
 `runbooks/examples/` を参照:
 
-- `dd-monitor-jira.yaml` — Datadog monitor 遷移 → Jira 起票/クローズ（datadog_monitors トリガー + datadog/jira provider）
-- `file-slack-alert.yaml` — アプリログ ERROR → Slack 一次切り分け（file トリガー + slack provider）
-- `cron-health-agent.yaml` — 定期 health check → 失敗時 Slack 通知（cron トリガー + slack provider）
-- `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack 一次切り分け（aws_cloudwatch_logs トリガー + slack provider）
+- `dd-monitor-jira.yaml` — Datadog monitor 遷移 → Jira 起票/クローズ
+- `file-slack-alert.yaml` — アプリログ ERROR → Slack 一次切り分け
+- `cron-health-agent.yaml` — 定期 health check → 失敗時 Slack 通知
+- `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack 一次切り分け

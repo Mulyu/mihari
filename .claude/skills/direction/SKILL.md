@@ -29,7 +29,7 @@ CLAUDE.md の 5 原則に対応する。新機能はこれらに照らして篩�
 
 - state 関連の I/O は失敗時にログだけ残して処理続行
 - state 破損で全ポーリングが止まる事態のほうが運用上重い
-- provider 必須 env の不足も**起動時 warn のみ**。プロセスは止めない（agent が当該 API を叩いた時点で SDK が失敗を返し、ランブックが ok=false になる）
+- SaaS 認証 env 不足は mihari 本体では感知しない。agent が当該 API を叩いた段階で SDK が失敗を返し、ランブックが ok=false になる
 - 例外: 起動時のディレクトリ作成失敗など、普通の運用では起きない場面では投げる
 
 ### 4. ランブックは agent 単一実行。ステップ列は持たない
@@ -37,7 +37,7 @@ CLAUDE.md の 5 原則に対応する。新機能はこれらに照らして篩�
 - ランブックの実行ロジックは `agent:` ブロック 1 つで表現する。`bash` / `claude` / `claude_agent` のステップ種別はすべて 1.0 で廃止された
 - 動的判断（外部 API の探索、結果に応じた次手の選択、起票/クローズの分岐）は agent が担う
 - 決定的な curl 1 本で済むケース（health check, 通知のみ）も agent loop に乗る。`max_turns: 1〜3` で十分なときはそう書く（コストとレイテンシは増えるが、表現を統一する利点を取る）
-- agent に「お決まりの SaaS 呼び出し作法」を与えるのは **provider preamble**（次節）の役割。new provider を増やすときは「provider preamble だけで吸収できるか」をまず問い、できないものに限って別の仕組みを検討する
+- SaaS の呼び出し作法（認証 env 名・エンドポイント・curl 例・冪等性パターン）は **ランブック著者が `agent.prompt` / `agent.system` に直接書く**。mihari 本体は SaaS 知識を持たない。「provider preamble の自動注入」は 1.0 で廃止された（`agent.providers` キーは loader が拒否する）
 
 ### 5. ローカル前提
 
@@ -45,31 +45,42 @@ CLAUDE.md の 5 原則に対応する。新機能はこれらに照らして篩�
 - すべて `~/.mihari/state/` で完結する形に保つ
 - マシンを跨いだ運用は「複数マシンで個別に動かす」前提で十分
 
-## Provider の扱い
+## SaaS 連携の扱い
 
-外部 SaaS（Datadog / Jira / Slack 等）を agent から叩く際の作法は、`agent.providers: [...]` 宣言で system prompt に preamble を自動 append する仕組みで提供する。
+外部 SaaS（Datadog / Jira / Slack 等）の呼び出し作法は、**ランブック著者の `agent.prompt` / `agent.system` の責務**。mihari 本体は SaaS の知識（認証 env 名・エンドポイント・curl 例・冪等性パターン）を一切持たない。
 
-### 認証は env、YAML には書かない
+### なぜ本体に持たせないか
 
-- 既存トリガー（aws_cloudwatch_logs / datadog_monitors）と同じ方針
-- mihari は YAML に認証フィールドを置かない。各 provider が必要とする env は `src/agent/providers/<name>.ts` に列挙
-- 起動時に必須 env が不足していれば warn だけ出す（fail-open）
+- preamble 自動注入（旧 `agent.providers:`）は 1.0 で廃止された。プロダクト境界は「ポーリングと cursor 管理」に閉じ、SaaS 側の作法（仕様変更が頻繁・呼び出しパターンが多様）はランブック著者に任せる
+- SaaS 別の知識を本体に貯めると、SaaS 側仕様変更のたびに mihari リリースが必要になる。`agent.prompt` に書く形なら著者が即座に更新できる
+- 認証 env は引き続き YAML に書かない（環境変数のみ）
 
-### Provider preamble の責務
+### 新 SaaS をランブックから叩くときの作法
 
-- 認証 env 名（値は書かない、参照のみ）
-- 主要エンドポイントと curl 例
-- 冪等性パターン（`MIHARI_IDEMPOTENCY_KEY` の使い方）
+ランブック著者向け：
 
-確定的 API ロジックは agent + ランブック著者の prompt に委ねる。preamble はあくまで「呼び出し作法のヒント」で、SaaS 側仕様変更があっても agent が補正できる構造に保つ。
+- 認証 env 名・curl 例・冪等性パターン（`MIHARI_IDEMPOTENCY_KEY` の使い方）を `agent.prompt` に直書きする
+- `allowed_tools` に `Bash(curl:*)` を入れる
+- `runbooks/examples/dd-monitor-jira.yaml` などのサンプル形式を踏襲する
 
-### 新 provider 追加の進め方
+mihari への新規追加で SaaS 連携を引き受けるべきケースは、**ポーリング目的のとき**だけ。それ以外（書き込み・参照系）はランブック側に閉じる。
 
-1. 必須 env と preamble を `src/agent/providers/<name>.ts` にまとめる
-2. `src/agent/providers/index.ts` の `Provider` 型・`PROVIDERS` 配列・`SPECS` に登録
-3. provider preamble の単体テストを追加（必須 env が preamble 中で参照されているか等）
-4. examples を 1 本足す
-5. doc/runbook-spec.md の provider 表に行を追加
+### 新トリガー追加の進め方
+
+ポーリング対象を本体に取り込みたい場合（cursor 管理を著者に書かせるのが現実的でないとき）に限り、トリガーを増やす。
+
+1. `src/types/index.ts` に `Trigger` / `TriggerEvent` / `<Name>PollerState` を追加
+2. `src/loader/trigger.ts` にバリデーション枝を追加（命名規約に従う）
+3. `src/triggers/<name>.ts` に Poller クラス + 動的 import 経由の API factory を実装
+4. `src/engine/matcher.ts` に match 関数を追加
+5. `src/engine/dispatcher.ts` のループに新ポーラーを差す
+6. `src/state/store.ts` に state I/O + validator を追加
+7. `src/cli/index.ts` の bootstrap に登録
+8. `src/agent/template.ts` の置換にイベントフィールドを追加（必要なら）
+9. テスト 2 本（loader / poller）を追加
+10. `runbooks/examples/` にサンプル 1 本
+11. `doc/runbook-spec.{md,ja.md}` の Triggers / Variables / Examples 表に追記
+12. `CLAUDE.md` の State 配置 / ライブラリ表 / 失敗モード表に追記
 
 ## YAML 命名規約
 
@@ -78,8 +89,9 @@ CLAUDE.md の 5 原則に対応する。新機能はこれらに照らして篩�
 ### 値はリテラル小文字、別名禁止
 
 - `source: file` / `source: cron` のように、リテラル文字列で識別共用体を切る
-- `permission_mode: strict` / `bypass`、`providers: [datadog, jira, slack]` も同じ
+- `permission_mode: strict` / `bypass` も同じ
 - 同じ意味に別名を与えない（例: `denied` を導入せず `forbidden` に統一する。`stop` の別名 `halt` を増やさない）
+- SaaS 由来のリテラル（CloudWatch の `OK` / Datadog の `alert` 等）はサービス側の語彙に揃え、mihari 内部で別名へ変換しない
 
 ### 「許可／禁止／必須」の語彙統一
 
@@ -114,8 +126,8 @@ CLAUDE.md の 5 原則に対応する。新機能はこれらに照らして篩�
 
 1. **5 原則のいずれかに正面から反していないか** → 反していれば即不採用、または agent 側で書ける形に振り直す
 2. **トリガー追加の場合は、既存トリガーの拡張に固執しない** → 観測対象（読み取り元・cursor の単位・SDK 依存）が既存トリガーのいずれとも異なるなら、新トリガーを正面から検討してよい。SDK は当該トリガーが存在する時だけ動的 import する形に保てば、本体の依存は増えない。「ポーリング型である」ことは譲らない
-3. **新 SaaS 連携の場合は、provider preamble で吸収できるか先に問う** → 吸収できるなら provider 追加（命名規約に沿わせる）。吸収できない（複雑な状態保持が必要、構造化ツールが必須など）場合だけ別の仕組みを検討
-4. **agent オプションの拡張は、ランブックの prompt と provider preamble で書けないか先に問う** → 書けるならランブック著者に任せる
+3. **新 SaaS 連携の場合は、ランブック著者の `agent.prompt` で書けるか先に問う** → 書ける（書き込み・参照系・通知）ならランブック著者に任せる。書けない（cursor 管理が必須＝ポーリング対象として観測したい）場合のみ、新トリガーとして検討する
+4. **agent オプションの拡張は、ランブックの prompt で書けないか先に問う** → 書けるならランブック著者に任せる
 5. **新規追加が妥当か** → 上を潰した残りで、はじめて新規を採用する
 
 ### 3. スコープの一方向性確認
@@ -147,8 +159,9 @@ CLAUDE.md の 5 原則に対応する。新機能はこれらに照らして篩�
 
 ### サンプル（`runbooks/examples/`）
 
-- 「provider preamble で吸収できるなら新機能ではなくサンプルで提示する」運用の受け皿
+- 「ランブック著者の `agent.prompt` 側で書けるなら新機能ではなくサンプルで提示する」運用の受け皿
 - 新ユースケースは原則ここに 1 ファイル追加して見せる
+- 認証 env 名・curl 例・冪等性パターンを各サンプルの prompt に書いておくと、著者がコピペで始められる
 
 ### README.md
 

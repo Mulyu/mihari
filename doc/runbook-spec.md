@@ -89,11 +89,6 @@ agent:
   system_file: prompts/system.md          # optional, mutually exclusive with system
   model: claude-opus-4-7                  # default claude-opus-4-7
 
-  providers:                              # optional, opt-in SaaS preambles
-    - datadog
-    - jira
-    - slack
-
   allowed_tools:                          # required, non-empty
     - Read
     - "Bash(curl:*)"
@@ -112,7 +107,6 @@ agent:
 | `prompt` / `prompt_file` | Prompt text or file (mutually exclusive; one is required) |
 | `system` / `system_file` | System prompt text or file (optional; mutually exclusive) |
 | `model` | Model id (default `claude-opus-4-7`) |
-| `providers` | Optional list of preamble opt-ins. Each name appends a Datadog/Jira/Slack-specific preamble onto the system prompt. See "Providers" below. |
 | `allowed_tools` | Tool allow-list. Plain names (`Read`, `Edit`, `Write`) and `Bash(<command>:*)` / `Bash(<exact>)` patterns. Anything not listed is denied without prompting. Must be non-empty. |
 | `permission_mode` | `strict` (every tool call goes through `canUseTool`) or `bypass` (sets `allowDangerouslySkipPermissions`). |
 | `max_turns` | Maximum agentic turns. mihari default `30`. |
@@ -120,19 +114,13 @@ agent:
 | `cwd` | Absolute path the agent operates in. Defaults to mihari's startup directory. |
 | `conventions` | When `true`, mihari prepends an idempotency preamble instructing the agent to use `claude/fix-$MIHARI_IDEMPOTENCY_KEY` as the branch name and to skip when an existing branch / open PR / dirty tree is detected. The preamble references `git status:*`, `git ls-remote:*`, and `gh pr list:*`; allow those in `allowed_tools` if you turn it on. Default `false`. |
 
-The composed system prompt order is `[conventions preamble (if true)] → [provider preambles in declared order] → [user system]`.
+The composed system prompt order is `[conventions preamble (if true)] → [user system]`.
 
-## Providers
+## SaaS integration
 
-Declaring `agent.providers: [...]` inserts service-specific preambles into the system prompt. Authentication stays in environment variables (mihari never puts secrets in YAML).
+mihari itself injects no SaaS-specific call patterns. Auth env var names, endpoints, curl examples, and idempotency patterns are the runbook author's responsibility — write them directly in `agent.prompt` or `agent.system`.
 
-| Provider | Required env | Preamble content |
-|---|---|---|
-| `datadog` | `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE` | curl pattern with the API/APP key headers, common endpoints (monitor / events / metric query) |
-| `jira` | `JIRA_BASE`, `JIRA_USER`, `JIRA_TOKEN` | curl pattern with basic auth, search/create/transition endpoints, idempotency pattern using `MIHARI_IDEMPOTENCY_KEY` |
-| `slack` | `SLACK_WEBHOOK_URL` | incoming webhook curl pattern |
-
-Missing required env at startup is a warning, not a fatal — mihari keeps running so the agent surfaces the failure when it actually tries to call the API.
+See `runbooks/examples/dd-monitor-jira.yaml` for a concrete example. `MIHARI_IDEMPOTENCY_KEY` is always injected into the agent's environment, so the author can use it for duplicate detection (issue search / branch name / message tag, etc.) without any framework support.
 
 ## Variables
 
@@ -165,7 +153,7 @@ mihari validate runbooks/                # Pass a directory to validate everythi
 
 See `runbooks/examples/`:
 
-- `dd-monitor-jira.yaml` — Datadog monitor transitions → Jira create/close (datadog_monitors trigger + datadog/jira providers)
-- `file-slack-alert.yaml` — Application log ERROR → Slack triage (file trigger + slack provider)
-- `cron-health-agent.yaml` — Periodic health check → Slack on failure (cron trigger + slack provider)
-- `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack triage (aws_cloudwatch_logs trigger + slack provider)
+- `dd-monitor-jira.yaml` — Datadog monitor transitions → Jira create/close
+- `file-slack-alert.yaml` — Application log ERROR → Slack triage
+- `cron-health-agent.yaml` — Periodic health check → Slack on failure
+- `cw-error-triage.yaml` — CloudWatch Logs ERROR → Slack triage

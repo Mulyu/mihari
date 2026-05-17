@@ -46,7 +46,6 @@ describe("runbook-level fields", () => {
     expect(rb.agent.max_turns).toBe(30);
     expect(rb.agent.timeout_sec).toBe(600);
     expect(rb.agent.conventions).toBe(false);
-    expect(rb.agent.providers).toEqual([]);
   });
 
   it("accepts enabled / cooldown_sec", () => {
@@ -185,41 +184,12 @@ agent:
   });
 });
 
-describe("agent.providers", () => {
-  it("accepts supported provider literals", () => {
-    const yaml = VALID_YAML + "\n  providers: [datadog, jira, slack]";
+describe("agent.providers (removed)", () => {
+  it("rejects any agent.providers key", () => {
+    const yaml = VALID_YAML + "\n  providers: [datadog]";
     const f = join(dir, "rb.yaml");
     writeFileSync(f, yaml);
-    const rb = loadRunbookFile(f);
-    expect(rb.agent.providers).toEqual(["datadog", "jira", "slack"]);
-  });
-
-  it("rejects unknown provider", () => {
-    const yaml = VALID_YAML + "\n  providers: [pagerduty]";
-    const f = join(dir, "rb.yaml");
-    writeFileSync(f, yaml);
-    expect(() => loadRunbookFile(f)).toThrow(/providers\[0\] must be one of/);
-  });
-
-  it("rejects duplicate providers", () => {
-    const yaml = VALID_YAML + "\n  providers: [jira, jira]";
-    const f = join(dir, "rb.yaml");
-    writeFileSync(f, yaml);
-    expect(() => loadRunbookFile(f)).toThrow(/duplicate/);
-  });
-
-  it("rejects non-string entries", () => {
-    const yaml = VALID_YAML + "\n  providers: [42]";
-    const f = join(dir, "rb.yaml");
-    writeFileSync(f, yaml);
-    expect(() => loadRunbookFile(f)).toThrow(/providers\[0\] must be a string/);
-  });
-
-  it("defaults to []", () => {
-    const f = join(dir, "rb.yaml");
-    writeFileSync(f, VALID_YAML);
-    const rb = loadRunbookFile(f);
-    expect(rb.agent.providers).toEqual([]);
+    expect(() => loadRunbookFile(f)).toThrow(/"agent.providers" was removed/);
   });
 });
 

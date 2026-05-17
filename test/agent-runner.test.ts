@@ -61,7 +61,7 @@ describe("matchesAllowedTools", () => {
 
 describe("composeSystemPrompt", () => {
   it("returns undefined when nothing is set", () => {
-    const a: Agent = fakeAgent({ providers: [], conventions: false });
+    const a: Agent = fakeAgent({ conventions: false });
     expect(composeSystemPrompt(a, undefined)).toBeUndefined();
   });
 
@@ -72,22 +72,18 @@ describe("composeSystemPrompt", () => {
     expect(out).toContain("git status --porcelain");
   });
 
-  it("appends provider preambles in declared order", () => {
-    const a: Agent = fakeAgent({ providers: ["jira", "datadog"] });
-    const out = composeSystemPrompt(a, undefined);
-    const jiraIdx = out!.indexOf("Jira provider");
-    const ddIdx = out!.indexOf("Datadog provider");
-    expect(jiraIdx).toBeGreaterThanOrEqual(0);
-    expect(ddIdx).toBeGreaterThan(jiraIdx);
+  it("appends user system prompt after conventions", () => {
+    const a: Agent = fakeAgent({ conventions: true });
+    const out = composeSystemPrompt(a, "Custom user system");
+    const convIdx = out!.indexOf("MIHARI_IDEMPOTENCY_KEY");
+    const userIdx = out!.indexOf("Custom user system");
+    expect(convIdx).toBeGreaterThanOrEqual(0);
+    expect(userIdx).toBeGreaterThan(convIdx);
   });
 
-  it("appends user system prompt last", () => {
-    const a: Agent = fakeAgent({ providers: ["slack"] });
-    const out = composeSystemPrompt(a, "Custom user system");
-    const slackIdx = out!.indexOf("Slack provider");
-    const userIdx = out!.indexOf("Custom user system");
-    expect(slackIdx).toBeGreaterThanOrEqual(0);
-    expect(userIdx).toBeGreaterThan(slackIdx);
+  it("returns user system alone when conventions=false", () => {
+    const a: Agent = fakeAgent({ conventions: false });
+    expect(composeSystemPrompt(a, "Just user")).toBe("Just user");
   });
 });
 
@@ -150,7 +146,6 @@ describe("runAgent: SDK options wiring", () => {
       fakeAgent({
         prompt: "host={{ env.MIHARI_TEST_HOST }} ts={{ event.timestamp }}",
         system: "sys={{ event.timestamp }}",
-        providers: [],
         conventions: false,
       }),
       ctx(),

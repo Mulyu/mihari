@@ -11,15 +11,15 @@
 - `aws_cloudwatch_logs` トリガー: CloudWatch Logs を `interval_sec` 間隔でポーリングし、event 1 件ごとに発火
 - `datadog_monitors` トリガー: Datadog Monitor を `interval_sec` 間隔でポーリングし、状態遷移 1 件ごとに発火
 - 実行ロジックは `agent:` ブロック単一。Claude Agent SDK で動的に Bash / Read / Edit などを使う
-- 外部 SaaS の作法は **provider preamble**（`agent.providers: []` で opt-in）で system prompt に注入
+- 外部 SaaS（Datadog / Jira / Slack 等）の呼び出し作法は **ランブック著者の `agent.prompt` 責務**。mihari 本体は preamble を注入しない
 - state は `~/.mihari/state/` にローカル保存
 
 ## 設計原則
 
 1. **ポーリングのみ。Webhook は作らない。** inotify も使わない。新トリガー追加は一級市民として扱う（観測対象が既存と異なるなら新トリガーを足す。SDK は当該トリガーが存在する時のみ動的 import）。
 2. **重複実行は許容、冪等性はランブック側責務。** state でベストエフォートで防ぐが「絶対1回」は捨てる。`MIHARI_IDEMPOTENCY_KEY` は agent に env として常に渡る。
-3. **state 書き込み失敗は fail-open。** ログだけ残して処理続行。provider 必須 env の不足も起動時 warn のみ。
-4. **ランブックは agent 単一実行。ステップ列は持たない。** 1.0 で `bash` / `claude` / `claude_agent` ステップを撤廃。決定的処理（curl 1 本など）も agent loop に乗せる。動的判断は agent の責務、お決まり SaaS 作法は provider preamble の責務。
+3. **state 書き込み失敗は fail-open。** ログだけ残して処理続行。
+4. **ランブックは agent 単一実行。ステップ列は持たない。** 1.0 で `bash` / `claude` / `claude_agent` ステップを撤廃。決定的処理（curl 1 本など）も agent loop に乗せる。動的判断は agent の責務。SaaS の呼び出し作法（認証 env 名・エンドポイント・curl 例・冪等性パターン）はランブック著者が `agent.prompt` / `agent.system` に直接書く。mihari 本体は SaaS 知識を持たない。
 5. **ローカル前提。** リモート同期しない、複数マシン対応しない。
 
 ## ディレクトリ構造
@@ -35,12 +35,7 @@ mihari/
 ├── src/                        # 直下に .ts は置かない。すべてサブディレクトリ配下
 │   ├── agent/
 │   │   ├── runner.ts           # Claude Agent SDK の query() を呼ぶ単一ランナー
-│   │   ├── template.ts         # {{ event.* }} / {{ env.X }} の置換
-│   │   └── providers/
-│   │       ├── index.ts        # Provider 型 / composePreambles / missingEnv
-│   │       ├── datadog.ts      # 必須 env + preamble
-│   │       ├── jira.ts
-│   │       └── slack.ts
+│   │   └── template.ts         # {{ event.* }} / {{ env.X }} の置換
 │   ├── cli/
 │   │   └── index.ts            # commander エントリ。bootstrap → dispatcher
 │   ├── types/
@@ -54,7 +49,7 @@ mihari/
 │   │   ├── error.ts            # RunbookValidationError
 │   │   ├── primitives.ts       # mustString / optional* 等の小物
 │   │   ├── trigger.ts          # 4 トリガー
-│   │   ├── agent.ts            # agent: 直下 + providers
+│   │   ├── agent.ts            # agent: 直下（旧 providers: は拒否）
 │   │   └── runbook.ts          # 全体（id / trigger / agent + 旧 steps: 拒否）
 │   ├── state/
 │   │   └── store.ts            # ~/.mihari/state I/O
@@ -91,7 +86,7 @@ Executor.execute(runbook, event):
   state.appendRunResult({ ...agent をくるんだ RunResult })
 ```
 
-`agent.system` 合成順序: `[conventions preamble (if true)] → [provider preambles in declared order] → [user system]`。
+`agent.system` 合成順序: `[conventions preamble (if true)] → [user system]`。
 
 ## State 配置
 
@@ -110,15 +105,11 @@ Executor.execute(runbook, event):
 
 トリガー側の判定ロジックは 0.x からそのまま。詳細は `src/triggers/` 各ファイルの実装と `doc/runbook-spec.md` を参照。
 
-## Provider preamble
+## SaaS 連携
 
-`agent.providers: [...]` で宣言した provider それぞれの preamble が system prompt に prepend される。各 provider は `src/agent/providers/<name>.ts` に:
+mihari 本体は SaaS 知識を持たない。`agent.providers` は 1.0 で廃止（ランブック側で指定すると loader が拒否する）。認証 env 名、curl 例、エンドポイント、冪等性パターンは、ランブック著者が `agent.prompt` または `agent.system` に直接書く責務。
 
-- `name`: リテラル小文字（`Provider` 型に列挙）
-- `requiredEnv`: 必須環境変数（不足時は起動時 warn）
-- `preamble`: 認証 env 名・主要エンドポイント・curl 例・冪等性パターンを書く文字列
-
-をエクスポートする。確定的 API 呼び出しロジックは agent + ランブック著者の prompt に委ね、preamble は呼び出し作法の「ヒント」に留める。
+`MIHARI_IDEMPOTENCY_KEY` は agent の env に常時注入されるので、ランブック著者は重複検出（issue 検索 / branch 名 / message タグ等）にこれをそのまま使える。
 
 ## 失敗モードと対応
 
@@ -126,10 +117,11 @@ Executor.execute(runbook, event):
 |------|------|
 | ランブック YAML 不正 | 起動時に投げる（fail-closed） |
 | `steps:` キーが残存 | 1.0 で廃止された旨のメッセージで投げる |
+| `agent.providers:` キーが残存 | 1.0 で廃止された旨のメッセージで投げる |
 | state ディレクトリ作成失敗 | 起動時に投げる |
 | state 読み込み破損 | 該当 state を破棄して新規扱い、warn |
 | state 書き込み失敗 | warn ログのみ、処理続行（fail-open） |
-| provider 必須 env 不足 | 起動時 warn のみ。agent 実行時に SDK が失敗を返してランブック ok=false |
+| SaaS 認証 env 不足 | mihari は感知しない。agent が当該 API を叩いた段階で失敗、ランブック ok=false |
 | ログファイル消失 | warn のみ、次ティックで再試行 |
 | ログファイル inode 変化 / truncate | ローテーション/切り詰め扱い、`offset = 0` |
 | agent 失敗（max_turns / refusal / pause_turn 等） | `runRunbook` が ok=false で返す |
@@ -169,8 +161,9 @@ Executor.execute(runbook, event):
 - Webhook サーバ／受信エンドポイント公開
 - mihari 自身からの能動通知（Slack / Datadog などへの通知は agent の Bash tool から curl で行う）
 - 承認フロー / HTTP / SQL 等の新ステップ種別（ステップ概念自体を廃止した）
+- SaaS 呼び出し作法の本体注入（preamble / template / SDK ラッパ等）。すべてランブック著者の `agent.prompt` 責務
 - リモートステート同期（S3 等）
 - GUI
 - マルチテナント
 
-ポーリング型の新トリガー追加（他クラウドのログ／イベントを取りに行くなど）と、新 provider 追加は non-goal ではない。direction の判定フローを通して足す。
+ポーリング型の新トリガー追加（他クラウドのログ／イベントを取りに行くなど）は non-goal ではない。direction の判定フローを通して足す。

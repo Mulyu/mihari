@@ -25,8 +25,7 @@ import {
   createDatadogMonitorsApiFactory,
   uniqueDatadogMonitorsTriggers,
 } from "../triggers/datadog-monitors.js";
-import { missingEnv } from "../agent/providers/index.js";
-import type { Provider, Runbook, Trigger, TriggerEvent } from "../types/index.js";
+import type { Runbook, Trigger, TriggerEvent } from "../types/index.js";
 
 const log = logger("cli");
 
@@ -259,13 +258,6 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
   } else {
     log.warn({ runbooksDir }, "runbook directory not found, continuing with no runbooks");
   }
-  const declaredProviders = uniqueProviders(runbooks);
-  for (const m of missingEnv(declaredProviders, process.env)) {
-    log.warn(
-      { provider: m.provider, missing: m.vars },
-      "provider env missing; agent calls to this provider will likely fail",
-    );
-  }
 
   const state = new StateStore({ baseDir: opts.stateDir });
   const executor = createExecutor(state);
@@ -313,14 +305,6 @@ async function bootstrap(opts: GlobalOpts): Promise<Ctx> {
     awsCloudWatchLogsPollers,
     datadogMonitorsPollers,
   };
-}
-
-function uniqueProviders(runbooks: Runbook[]): Provider[] {
-  const set = new Set<Provider>();
-  for (const rb of runbooks) {
-    for (const p of rb.agent.providers) set.add(p);
-  }
-  return [...set];
 }
 
 function sleep(ms: number): Promise<void> {

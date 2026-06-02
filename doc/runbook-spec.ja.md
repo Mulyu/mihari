@@ -196,6 +196,7 @@ trigger:
 
 カーソルは `{issue_id -> last_seen_ms}` map。`is:unresolved` の issue を 24h 窓で観測し、未知 issue は `is_new=true` で fire、既知 issue は `last_seen` が進んだら fire する。datadog_monitors と同じ「前回 state ∪ 今回観測分」merge 方式。
 
+## エージェント
 
 ```yaml
 agent:

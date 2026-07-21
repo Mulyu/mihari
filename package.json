@@ -52,7 +52,7 @@
     "yaml": "2.8.3"
   },
   "devDependencies": {
-    "@mulyu/monban": "0.2.5",
+    "@mulyu/monban": "0.2.7",
     "@types/node": "22.19.17",
     "@types/proper-lockfile": "4.1.4",
     "typescript": "5.9.3",

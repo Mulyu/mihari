@@ -41,7 +41,7 @@
     "provenance": true
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.85",
+    "@anthropic-ai/claude-agent-sdk": "0.3.220",
     "@aws-sdk/client-cloudwatch": "3.1097.0",
     "@aws-sdk/client-cloudwatch-logs": "3.1097.0",
     "@datadog/datadog-api-client": "1.60.0",

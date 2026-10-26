@@ -46,7 +46,7 @@
     "@aws-sdk/client-cloudwatch-logs": "3.1121.0",
     "@datadog/datadog-api-client": "1.62.0",
     "commander": "15.0.0",
-    "croner": "10.0.1",
+    "croner": "11.0.0",
     "pino": "10.3.1",
     "proper-lockfile": "4.1.2",
     "yaml": "2.9.0"
